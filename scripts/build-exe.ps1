@@ -7,6 +7,12 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\build-exe.ps1
 #
 # The version comes from src\version.txt.
+#
+#   -Sign    also code-sign both programs and the scripts packed into the installer,
+#            with the certificate chosen by scripts\set-code-signing.ps1. Only a
+#            release does this; everything builds and runs the same without it.
+
+param([switch]$Sign)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -26,6 +32,13 @@ if (-not (Test-Path -LiteralPath $csc)) { throw "The C# compiler was not found a
 $automation = [psobject].Assembly.Location
 $icon = Join-Path $root 'src\ui\icon.ico'
 $manifest = Join-Path $root 'exe\app.manifest'
+
+$signing = $null
+if ($Sign) {
+    . (Join-Path $PSScriptRoot 'CodeSigning.ps1')
+    $signing = Get-CodeSigningSetup
+    if (-not $signing) { throw 'No signing certificate has been chosen. Run scripts\set-code-signing.ps1 first.' }
+}
 
 if (Test-Path -LiteralPath $obj) { Remove-Item -LiteralPath $obj -Recurse -Force }
 [void](New-Item -ItemType Directory -Force -Path $obj)
@@ -63,6 +76,9 @@ $appExe = Join-Path $bin 'WindowsDebloater.exe'
 $appVersion = Join-Path $obj 'AppVersion.cs'
 New-VersionFile $appVersion 'Windows Debloater' 'A clean start for Windows 11'
 Invoke-Compiler $appExe @("/r:$automation", '/r:System.dll', '/r:System.Core.dll', $appVersion, (Join-Path $root 'exe\WindowsDebloater.cs'))
+# Signed before it goes into the installer, so that the copy that gets installed is
+# signed as well.
+if ($signing) { Add-CodeSignature -Path $appExe -Certificate $signing.Thumbprint -Timestamp $signing.Timestamp -Description 'Windows Debloater' }
 Write-Host "Built $appExe"
 
 # ---------------------------------------------------------------- The installer
@@ -75,6 +91,8 @@ if ($setupSources.Count -gt 0) {
     [void](New-Item -ItemType Directory -Force -Path (Join-Path $stage 'docs'))
     Copy-Item -LiteralPath $appExe -Destination $stage
     Copy-Item -LiteralPath (Join-Path $root 'src') -Destination $stage -Recurse
+    # The copies that get installed, not the ones in src.
+    if ($signing) { [void](Add-ScriptSignatures -Folder (Join-Path $stage 'src') -Certificate $signing.Thumbprint -Timestamp $signing.Timestamp) }
     Copy-Item -LiteralPath (Join-Path $root 'docs\changes.md') -Destination (Join-Path $stage 'docs')
     foreach ($file in 'LICENSE.md', 'PRIVACY.md') { Copy-Item -LiteralPath (Join-Path $root $file) -Destination $stage }
     $payload = Join-Path $obj 'payload.zip'
@@ -107,6 +125,9 @@ if ($setupSources.Count -gt 0) {
         '/r:System.IO.Compression.dll', '/r:System.IO.Compression.FileSystem.dll', '/r:System.Web.Extensions.dll'
     )
     Invoke-Compiler $setupExe ($references + $resources + @($setupVersion) + $setupSources)
+    # The installer keeps a copy of itself next to the program as Uninstall.exe, so
+    # signing it signs the uninstaller too.
+    if ($signing) { Add-CodeSignature -Path $setupExe -Certificate $signing.Thumbprint -Timestamp $signing.Timestamp -Description 'Windows Debloater Setup' }
     Write-Host "Built $setupExe"
 }
 

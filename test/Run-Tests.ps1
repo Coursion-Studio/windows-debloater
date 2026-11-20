@@ -563,6 +563,128 @@ Check 'the program and the installer build, and carry the version' {
     }
 }
 
+# Code signing needs a certificate, and the real one sits on a token or in a cloud. So
+# this makes one that exists only in memory for the length of the check: nothing is
+# added to the certificate store. No PC trusts it, which is allowed for here and
+# refused everywhere else.
+function New-TestSigningCertificate {
+    $key = [Security.Cryptography.RSA]::Create(2048)
+    $request = New-Object Security.Cryptography.X509Certificates.CertificateRequest('CN=Windows Debloater Test Signing', $key,
+        [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    $uses = New-Object Security.Cryptography.OidCollection
+    [void]$uses.Add((New-Object Security.Cryptography.Oid('1.3.6.1.5.5.7.3.3')))
+    $request.CertificateExtensions.Add((New-Object Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension($uses, $true)))
+    $certificate = $request.CreateSelfSigned([DateTimeOffset]::Now.AddDays(-1), [DateTimeOffset]::Now.AddDays(2))
+    return [pscustomobject]@{ Key = $key; Certificate = $certificate }
+}
+
+Check 'a signed program is recognised, and a changed, unsigned or wrongly signed one is not' {
+    . (Join-Path $root 'scripts\CodeSigning.ps1')
+    Assert (Test-Path -LiteralPath $appExe) 'the program was not built'
+    $signed = Join-Path $temp 'signed.exe'
+    Copy-Item -LiteralPath $appExe -Destination $signed
+    $inStore = @(Get-ChildItem -Path Cert:\CurrentUser\My).Count
+
+    $made = New-TestSigningCertificate
+    $key = $made.Key
+    $certificate = $made.Certificate
+    try {
+        Add-CodeSignature -Path $signed -Certificate $certificate -AllowUntrusted
+        $mark = $certificate.Thumbprint
+        Assert ((Get-CodeSignatureProblem -Path $signed -Thumbprint $mark -AllowUntrusted) -eq '') 'a freshly signed program was not recognised'
+        Assert ((Get-CodeSignatureProblem -Path $signed -Thumbprint $mark) -like 'Windows does not accept*') 'a certificate no PC trusts was accepted for a release'
+        Assert ((Get-CodeSignatureProblem -Path $signed -Thumbprint ('0' * 40) -AllowUntrusted) -like 'it is signed by another certificate*') 'a program signed by someone else was accepted'
+        Assert ((Get-CodeSignatureProblem -Path $signed -Thumbprint $mark -RequireTimestamp -AllowUntrusted) -like '*no time on it*') 'a signature without a time was accepted for a release'
+        Assert ((Get-CodeSignatureProblem -Path $appExe -Thumbprint $mark -AllowUntrusted) -eq 'it is not signed') 'an unsigned program was taken as signed'
+
+        $changed = Join-Path $temp 'changed.exe'
+        $bytes = [IO.File]::ReadAllBytes($signed)
+        $bytes[2000] = $bytes[2000] -bxor 1
+        [IO.File]::WriteAllBytes($changed, $bytes)
+        Assert ((Get-CodeSignatureProblem -Path $changed -Thumbprint $mark -AllowUntrusted) -eq 'it was changed after it was signed') 'a program changed after signing was accepted'
+    } finally {
+        $certificate.Dispose()
+        $key.Dispose()
+    }
+    Assert (@(Get-ChildItem -Path Cert:\CurrentUser\My).Count -eq $inStore) 'the check left a certificate in the store'
+}
+
+# The scripts do the work, so a signed release signs them too. Signing adds a block of
+# text to a file, which is why it is done to the copies that ship and never to src.
+Check 'the scripts a release ships are signed as copies, and a changed one is noticed' {
+    . (Join-Path $root 'scripts\CodeSigning.ps1')
+    $ours = @(Get-ChildItem -LiteralPath $src -Recurse -File | Where-Object { $_.Extension -in '.ps1', '.psm1' })
+    $before = @{}
+    foreach ($file in $ours) { $before[$file.FullName] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash }
+    $shipped = Join-Path $temp 'signed-src'
+    Copy-Item -LiteralPath $src -Destination $shipped -Recurse
+    $other = Join-Path $shipped 'lang\en.json'
+    $otherBefore = (Get-FileHash -LiteralPath $other -Algorithm SHA256).Hash
+
+    $made = New-TestSigningCertificate
+    try {
+        $mark = $made.Certificate.Thumbprint
+        $count = Add-ScriptSignatures -Folder $shipped -Certificate $made.Certificate -AllowUntrusted
+        Assert ($count -gt 0 -and $count -eq $ours.Count) "signed $count scripts, src has $($ours.Count)"
+        $copies = @(Get-ChildItem -LiteralPath $shipped -Recurse -File | Where-Object { $_.Extension -in '.ps1', '.psm1' })
+        foreach ($file in $copies) {
+            $problem = Get-CodeSignatureProblem -Path $file.FullName -Thumbprint $mark -AllowUntrusted
+            Assert ($problem -eq '') "$($file.Name): $problem"
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            Assert (@($errors).Count -eq 0) "$($file.Name) no longer parses once it is signed"
+        }
+        Assert ((Get-FileHash -LiteralPath $other -Algorithm SHA256).Hash -eq $otherBefore) 'a file that is not a script was changed'
+        foreach ($file in $ours) {
+            Assert ((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -eq $before[$file.FullName]) "$($file.Name) in src was changed; only the copies may be signed"
+        }
+
+        $changed = $copies[0].FullName
+        [IO.File]::WriteAllText($changed, ("# One line more.`r`n" + [IO.File]::ReadAllText($changed)))
+        Assert ((Get-CodeSignatureProblem -Path $changed -Thumbprint $mark -AllowUntrusted) -eq 'it was changed after it was signed') 'a script changed after signing was accepted'
+    } finally {
+        $made.Certificate.Dispose()
+        $made.Key.Dispose()
+    }
+}
+
+# For one run the certificate can be named in the environment instead of in the file.
+Check 'the certificate can be named for one run, and a wrong name is refused' {
+    . (Join-Path $root 'scripts\CodeSigning.ps1')
+    $keptFile = $script:CodeSigningFile
+    $keptMark = $env:CODESIGN_THUMBPRINT
+    $keptServer = $env:CODESIGN_TIMESTAMP
+    try {
+        $script:CodeSigningFile = Join-Path $temp 'no-code-signing.json'
+        $env:CODESIGN_THUMBPRINT = $null
+        $env:CODESIGN_TIMESTAMP = $null
+        Assert ($null -eq (Get-CodeSigningSetup)) 'a certificate was found where none has been chosen'
+
+        $env:CODESIGN_THUMBPRINT = 'ab cd ' + ('01' * 18)
+        $setup = Get-CodeSigningSetup
+        Assert ($setup.Thumbprint -eq ('ABCD' + ('01' * 18))) "the thumbprint was read as $($setup.Thumbprint)"
+        Assert ([bool]$setup.Timestamp) 'no time server was chosen'
+        $env:CODESIGN_TIMESTAMP = 'http://time.example'
+        Assert ((Get-CodeSigningSetup).Timestamp -eq 'http://time.example') 'the given time server was not used'
+
+        $env:CODESIGN_THUMBPRINT = 'not a thumbprint'
+        $refused = $false
+        try { [void](Get-CodeSigningSetup) } catch { $refused = $true }
+        Assert $refused 'a thumbprint that is none was accepted'
+    } finally {
+        $script:CodeSigningFile = $keptFile
+        $env:CODESIGN_THUMBPRINT = $keptMark
+        $env:CODESIGN_TIMESTAMP = $keptServer
+    }
+}
+
+# The certificate itself can never be in the repository, and neither can which one it is.
+Check 'nothing about the signing certificate is kept in the project' {
+    Assert (-not (Test-Path -LiteralPath (Join-Path $root 'code-signing.json'))) 'the choice of certificate belongs in %APPDATA%\Coursion\keys, not here'
+    foreach ($found in @(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { $_.Extension -in '.pfx', '.p12', '.pvk', '.snk' -and $_.FullName -notlike '*\design\*' })) {
+        Assert $false "$($found.Name) looks like a certificate with its key; it must not be in the project"
+    }
+}
 Check 'the installer has its texts in every language' {
     $english = $languages['en']
     $wanted = @()

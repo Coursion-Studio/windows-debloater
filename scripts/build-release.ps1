@@ -13,6 +13,14 @@
 # Signing needs the private half of the update key, which scripts\new-update-key.ps1
 # made once: %APPDATA%\Coursion\keys\windows-debloater-update.xml. All five files go
 # onto the release; update.json has to keep exactly that name.
+#
+# That signature is for the tool's own update check. Code signing is a second, separate
+# one, the one Windows itself reads: when a certificate has been chosen with
+# scripts\set-code-signing.ps1, both programs and the scripts they ship with are signed
+# with it, and the release is refused if that does not work. -Unsigned builds a release
+# without it on purpose.
+
+param([switch]$Unsigned)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -28,8 +36,24 @@ if (-not (Test-Path -LiteralPath $keyFile)) {
     throw "The update signing key was not found at $keyFile. Restore it from your backup. A new key would not do: copies that are already installed only accept the old one."
 }
 
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build-exe.ps1')
+. (Join-Path $PSScriptRoot 'CodeSigning.ps1')
+$signing = $null
+if (-not $Unsigned) { $signing = Get-CodeSigningSetup }
+
+if ($signing) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build-exe.ps1') -Sign
+} else {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build-exe.ps1')
+}
 if ($LASTEXITCODE -ne 0) { throw 'Building the programs failed.' }
+
+# Checked again here, on the very files that go out.
+if ($signing) {
+    foreach ($program in 'WindowsDebloater.exe', 'WindowsDebloaterSetup.exe') {
+        $problem = Get-CodeSignatureProblem -Path (Join-Path $root ('bin\' + $program)) -Thumbprint $signing.Thumbprint -RequireTimestamp
+        if ($problem) { throw "$program cannot be released: $problem." }
+    }
+}
 
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 foreach ($old in $zip, $setup, ($zip + '.sha256'), ($setup + '.sha256'), $feedPath) {
@@ -44,6 +68,10 @@ foreach ($file in 'README.md', 'LICENSE.md', 'PRIVACY.md', 'CHANGELOG.md') {
     Copy-Item -LiteralPath (Join-Path $root $file) -Destination $stage
 }
 Copy-Item -LiteralPath (Join-Path $root 'src') -Destination $stage -Recurse
+if ($signing) {
+    $count = Add-ScriptSignatures -Folder (Join-Path $stage 'src') -Certificate $signing.Thumbprint -Timestamp $signing.Timestamp
+    Write-Host "Signed the $count scripts in the zip."
+}
 # Of docs, only the list of changes goes along. The banner, the film and the pictures
 # are several times the size of the program, so they stay on the project page, and the
 # zip's copy of the README shows them from there.
@@ -116,3 +144,12 @@ $feed = [ordered]@{
 }
 [IO.File]::WriteAllText($feedPath, ($feed | ConvertTo-Json -Depth 3), (New-Object Text.UTF8Encoding($false)))
 Write-Host ("{0}`n   version {1}, signed, {2} notes" -f $feedPath, $version, $notes.Count)
+
+Write-Host ''
+if ($signing) {
+    $signer = (Get-AuthenticodeSignature -LiteralPath $setup).SignerCertificate.Subject
+    Write-Host "Code-signed by: $signer"
+} else {
+    Write-Host 'Not code-signed: Windows will call the publisher unknown.'
+    Write-Host 'Once there is a certificate, scripts\set-code-signing.ps1 chooses it and releases are signed from then on.'
+}

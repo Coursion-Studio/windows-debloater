@@ -222,7 +222,7 @@ The tests change nothing on the PC apart from a scratch registry key they create
 
 How it works: the window never changes the PC itself. It writes a plan and starts hidden PowerShell workers, one without elevation for per-user changes and one elevated for machine-wide settings. Each worker reports progress as lines of JSON and records every change before making it, which is what Revert reads.
 
-Releases are signed. `scripts\build-release.ps1` needs the private half of the update key, which only the maintainer has; everything else builds without it. A copy you build yourself will only accept updates signed with that key.
+Releases carry two signatures, and you need neither to build. The update signature is made with the private half of the update key, which only the maintainer has; a copy you build yourself will only accept updates signed with that key. The code signature, the one Windows reads, is added by the release script once a certificate has been chosen with `scripts\set-code-signing.ps1`: it signs both programs and the scripts they ship with. Until then releases are not code-signed, which is why SmartScreen warns.
 
 ## 🐛 Issues & feedback
 
