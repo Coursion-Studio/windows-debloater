@@ -1,9 +1,8 @@
 # Every push and pull request: run the tests, then build both programs, unsigned.
 # The programs are kept as a workflow artifact for a week, for trying out.
 #
-# Releases are not built here. They are built and code-signed on the maintainer's PC
-# with scripts\build-release.ps1, because the code-signing certificate and the update
-# key both stay there.
+# Releases are not built here. They are built on the maintainer's PC with
+# scripts\build-release.ps1, because the update key stays there.
 
 name: CI
 
@@ -29,7 +28,7 @@ jobs:
         # The tool runs on Windows PowerShell 5.1, so it is tested and built with it.
         shell: powershell
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Tests
         run: |
@@ -43,7 +42,7 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-exe.ps1
           if ($LASTEXITCODE -ne 0) { throw "Build failed ($LASTEXITCODE)." }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-debloater-unsigned
           path: |
