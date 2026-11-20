@@ -273,6 +273,10 @@ if (Test-Path $scratchKey) { Remove-Item -Path $scratchKey -Recurse -Force }
 
 $temp = Join-Path $env:TEMP ('debloater-test-' + [guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Force -Path $temp)
+# TEMP can hold a short 8.3 name (C:\Users\RUNNER~1\... on GitHub's runners, or for any
+# long user name), while folder listings give the long one. The checks compare paths
+# from both, so the long form is used throughout.
+$temp = (Get-Item -LiteralPath $temp).FullName
 $env:DEBLOATER_DATA = Join-Path $temp 'data'
 $entryScript = Join-Path $src 'Debloater.ps1'
 
