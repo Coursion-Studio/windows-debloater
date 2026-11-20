@@ -1,6 +1,5 @@
 <p align="center">
-  <img src="docs/demo.gif" alt="Windows 11 as it comes, Windows Debloater at work, and the same PC afterwards" width="100%">
-  <br><sub>Windows 11 as it comes, one press of Debloat, and what is left. The window is the real one, filmed in demo mode; the desktop around it is a sketch.</sub>
+  <img src="docs/banner.png" alt="Windows Debloater: a clean start for Windows 11" width="100%">
 </p>
 
 <p align="center">
@@ -8,7 +7,7 @@
   <a href="https://github.com/Coursion-Studio/windows-debloater/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Coursion-Studio/windows-debloater/total?style=flat-square&color=e04a8b"></a>
   <img alt="Windows 11" src="https://img.shields.io/badge/Windows-11-0078d4?style=flat-square&logo=windows">
   <img alt="No admin needed to install" src="https://img.shields.io/badge/install-no%20admin%20needed-2ecc71?style=flat-square">
-  <a href="LICENSE.md"><img alt="Proprietary licence" src="https://img.shields.io/badge/licence-proprietary-4b0082?style=flat-square"></a>
+  <a href="LICENSE.md"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-22c55e?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -27,6 +26,11 @@
 </p>
 
 ---
+
+<p align="center">
+  <img src="docs/demo.gif" alt="Windows 11 as it comes, Windows Debloater at work, and the same PC afterwards" width="100%">
+  <br><sub><b>See it in action:</b> Windows 11 as it comes, one press of Debloat, and what is left. The window is the real one; the desktop around it is a sketch.</sub>
+</p>
 
 ## 🚀 Install
 
@@ -53,22 +57,25 @@ It **updates itself**: it checks once a day and installs a new version with one 
 
 ## 🪟 Windows 11 before and after
 
-What Windows 11 does as it comes, and what is left after one press of **Debloat** with the recommended selection. Which apps a PC ships with depends on its edition, region and maker; the tool only lists what it actually finds.
+What Windows 11 does as it comes, and what is left after one press of **Debloat**. Which apps a PC ships with depends on its edition, region and maker; the tool only lists what it actually finds.
 
 | | Windows 11 as installed | After Windows Debloater |
 |---|---|---|
-| Start menu | Promoted apps arrive pinned, and Windows can quietly install more. App suggestions, and reminders about Microsoft 365, OneDrive backup and signing in. | Only what you put there. No promoted installs, no suggestions, no reminders. |
-| Start search | Mixes web results from Bing into what you type. | Searches this PC. |
-| Preinstalled apps | Clipchamp, Solitaire, Candy Crush, News, Weather, Maps, To Do, Power Automate, Feedback Hub, Get Help and more. | Removed. Revert brings any of them back. |
-| Widgets | A Widgets button on the taskbar with a news feed behind it, and weather and news cards on the lock screen. | Blocked, on the taskbar and on the lock screen. |
-| Lock screen | Fun facts, tips and promotions over the picture. | Just the picture. |
-| Microsoft Edge | Starts with Windows, preloads itself at sign-in and keeps running after you close its window. | Starts when you open it and stops when you close it. Edge stays installed. |
-| File Explorer | Promotions for OneDrive and Microsoft 365. | None. |
-| Settings app | Suggested content between the settings. | None. |
-| Tips and nags | Tips, welcome screens after updates, "finish setting up your device", suggested notifications. | Off. |
-| Advertising | An advertising ID that apps can read, and tips and ads tailored from diagnostic data. | Both off. |
+| **Start menu** | Promoted apps pinned for you, more installed quietly, plus suggestions and sign-in reminders. | Only what you put there. |
+| **Start search** | Web results from Bing mixed into what you type. | Searches this PC. |
+| **Preinstalled apps** | Clipchamp, Solitaire, Candy Crush, News, Weather, Maps, To Do, Feedback Hub, Get Help and more. | Removed. Revert brings any of them back. |
+| **Widgets** | A taskbar button with a news feed behind it, and news cards on the lock screen. | Blocked, in both places. |
+| **Lock screen** | Fun facts, tips and promotions over the picture. | Just the picture. |
+| **Microsoft Edge** | Starts with Windows, preloads at sign-in, keeps running after you close it. | Starts when you open it, stops when you close it. Edge stays installed. |
+| **File Explorer** | Promotions for OneDrive and Microsoft 365. | None. |
+| **Settings app** | Suggested content between the settings. | None. |
+| **Tips and nags** | Tips, welcome screens after updates, "finish setting up your device". | Off. |
+| **Advertising** | An advertising ID apps can read, and ads tailored from diagnostic data. | Both off. |
 
-That is the recommended selection: 40 changes, ticked when the tool opens. Another 23 are there if you want them and are never applied unless you tick them:
+That is the recommended selection: 40 changes, ticked when the tool opens. Another 23 are there if you want them and are never applied unless you tick them.
+
+<details>
+<summary><b>The 23 optional changes</b></summary>
 
 | Optional | What ticking it does |
 |---|---|
@@ -76,8 +83,9 @@ That is the recommended selection: 40 changes, ticked when the tool opens. Anoth
 | Xbox and gaming | Removes the Xbox app, Xbox Game Bar and the Xbox sign-in helpers, and stops the pop-ups that follow when Game Bar is gone. |
 | Lock screen and desktop pictures | Replaces Windows Spotlight and the desktop picture with the standard Windows pictures. |
 | OneDrive | Downloads files that exist only online, moves Desktop, Documents and Pictures back to their normal folders and removes OneDrive. |
+</details>
 
-What it does not claim: it has not been benchmarked, so there are no numbers here about speed, memory or disk space. What changes is what you see, what asks for your attention, and what starts without being asked.
+No promises about speed, memory or disk space: none of that has been measured. What changes is what you see, what asks for your attention, and what starts without being asked.
 
 ## ✨ Features
 
@@ -86,7 +94,7 @@ What it does not claim: it has not been benchmarked, so there are no numbers her
 | 🧹 **One button** | **Debloat** applies everything that is ticked, in every area, after one confirmation. The recommended changes are ticked when the tool opens. |
 | ✅ **You confirm first** | A short summary says what will happen. Nothing changes until you press **Debloat now**. |
 | ↩️ **Revert** | Undo a whole run: settings go back to the values they had, the apps it removed come back, and OneDrive is installed again. |
-| 🔍 **Nothing hidden** | Every item has a **What this changes** line with the exact app package or registry value. The complete list is in [docs/changes.md](docs/changes.md). |
+| 🔍 **Nothing hidden** | Every item has a **What this changes** line with the exact app package or registry value. The complete list is in [docs/changes.md](docs/changes.md), and the code is all here. |
 | 📦 **Only what is there** | It looks at your PC first and lists only the apps and settings it actually finds. |
 | 🛡️ **Careful with OneDrive** | Online-only files are downloaded first, your folders are copied back, and nothing is deleted. Work and school accounts are left alone. |
 | 🔄 **Automatic updates** | Checks once a day, shows what's new, and installs with one click. Every update is signed by Coursion Studio. |
@@ -95,7 +103,9 @@ What it does not claim: it has not been benchmarked, so there are no numbers her
 
 ## 📸 Screenshots
 
-![The overview](docs/img/home.png)
+<p align="center">
+  <img src="docs/img/home.png" width="100%" alt="The overview: five areas, how much is ticked, and the Debloat button">
+</p>
 
 A row opens its area, where you choose exactly what is ticked. Before anything happens, the summary asks you to confirm.
 
@@ -178,12 +188,46 @@ Yes. Press <kbd>Win</kbd>+<kbd>R</kbd> and run `"%LocalAppData%\Programs\Windows
 The program is in `%LocalAppData%\Programs\WindowsDebloater`. Its history, with the old value of every setting it changed, is in `%LocalAppData%\WindowsDebloater`; that is what Revert reads.
 </details>
 
+<details>
+<summary><b>Has it been tested?</b></summary>
+
+It was built and checked on Windows 11 Pro 25H2. The test suite runs the whole window in a dry run and installs, updates and uninstalls the program in a scratch folder. Two things have not been proven on a real PC yet: Revert bringing apps and OneDrive back, which is new, and the tool as a whole on other editions of Windows 11. Windows Sandbox or a virtual machine is the safe place to try it first.
+</details>
+
+## 🛠️ Build from source
+
+There's nothing to install, because the C# compiler that ships with Windows is enough.
+
+```powershell
+git clone https://github.com/Coursion-Studio/windows-debloater.git
+cd windows-debloater
+.\WindowsDebloater.cmd -Demo                                      # run from source, changing nothing
+powershell -ExecutionPolicy Bypass -File test\Run-Tests.ps1       # the tests
+powershell -ExecutionPolicy Bypass -File scripts\build-exe.ps1    # -> bin\WindowsDebloater.exe and bin\WindowsDebloaterSetup.exe
+```
+
+The tests change nothing on the PC apart from a scratch registry key they create and delete. The installer is tried inside a temporary folder, away from the real Start menu and the list of installed apps.
+
+| Path | What's inside |
+|---|---|
+| `src/Debloater.Engine.psm1` | Catalog, scan, apply, revert and the update check. No window code. |
+| `src/Debloater.UI.ps1`, `src/ui/MainWindow.xaml` | The window: its behaviour, and its layout with every visual style. |
+| `src/catalog/` | Everything the tool can change, as JSON. Adding an app or a setting is usually a change here plus its texts. |
+| `src/lang/` | Texts, one file per language. To add a language, copy `en.json` and translate the values. |
+| `exe/` | `WindowsDebloater.exe`: runs the scripts in `src` inside its own process. |
+| `setup/` | `WindowsDebloaterSetup.exe`: install, update and uninstall. |
+| `scripts/` | Building the programs, the release, the README pictures and the film at the top of this page. |
+| `test/` | The tests, and one that applies every setting for real inside Windows Sandbox. |
+
+How it works: the window never changes the PC itself. It writes a plan and starts hidden PowerShell workers, one without elevation for per-user changes and one elevated for machine-wide settings. Each worker reports progress as lines of JSON and records every change before making it, which is what Revert reads.
+
+Releases are signed. `scripts\build-release.ps1` needs the private half of the update key, which only the maintainer has; everything else builds without it. A copy you build yourself will only accept updates signed with that key.
+
 ## 🐛 Issues & feedback
 
 Open an issue on this repo, or email [support@coursion.studio](mailto:support@coursion.studio).
-The source code lives in a private repo. This one hosts the releases, the update feed and this page.
 
 ## 📄 Licence
 
-Proprietary. See [LICENSE.md](LICENSE.md). © 2026 Coursion Studio. All rights reserved.
+MIT. See [LICENSE.md](LICENSE.md). © 2026 Coursion Studio.
 Questions: [support@coursion.studio](mailto:support@coursion.studio) · [coursion.studio](https://coursion.studio)

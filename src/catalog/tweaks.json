@@ -1,0 +1,142 @@
+{
+  "items": [
+    {
+      "id": "ads.promoted-apps", "page": "ads", "group": "promoted", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "SilentInstalledAppsEnabled", "value": 0 },
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "PreInstalledAppsEnabled", "value": 0 },
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "OemPreInstalledAppsEnabled", "value": 0 }
+      ]
+    },
+    {
+      "id": "ads.start-suggestions", "page": "ads", "group": "start", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "SystemPaneSuggestionsEnabled", "value": 0 },
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "SubscribedContent-338388Enabled", "value": 0 },
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "Start_IrisRecommendations", "value": 0 }
+      ]
+    },
+    {
+      "id": "ads.account-nags", "page": "ads", "group": "start", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "Start_AccountNotifications", "value": 0 }
+      ]
+    },
+    {
+      "id": "search.bing", "page": "ads", "group": "start", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search", "name": "BingSearchEnabled", "value": 0 },
+        { "path": "HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer", "name": "DisableSearchBoxSuggestions", "value": 1, "admin": true }
+      ]
+    },
+    {
+      "id": "ads.tips", "page": "ads", "group": "tips", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "SoftLandingEnabled", "value": 0 },
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "SubscribedContent-338389Enabled", "value": 0 },
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "SubscribedContent-310093Enabled", "value": 0 }
+      ]
+    },
+    {
+      "id": "ads.finish-setup", "page": "ads", "group": "tips", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\UserProfileEngagement", "name": "ScoobeSystemSettingEnabled", "value": 0 }
+      ]
+    },
+    {
+      "id": "ads.suggested-notifications", "page": "ads", "group": "tips", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\Windows.SystemToast.Suggested", "name": "Enabled", "value": 0 }
+      ]
+    },
+    {
+      "id": "ads.settings-suggestions", "page": "ads", "group": "tips", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "SubscribedContent-338393Enabled", "value": 0 },
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "SubscribedContent-353694Enabled", "value": 0 },
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "SubscribedContent-353696Enabled", "value": 0 }
+      ]
+    },
+    {
+      "id": "ads.explorer", "page": "ads", "group": "tips", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "ShowSyncProviderNotifications", "value": 0 }
+      ]
+    },
+    {
+      "id": "ads.advertising-id", "page": "ads", "group": "privacy", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo", "name": "Enabled", "value": 0 }
+      ]
+    },
+    {
+      "id": "ads.tailored", "page": "ads", "group": "privacy", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Privacy", "name": "TailoredExperiencesWithDiagnosticDataEnabled", "value": 0 }
+      ]
+    },
+
+    {
+      "id": "edge.autostart", "page": "edge", "group": "edge", "recommended": true,
+      "actions": ["RemoveEdgeAutostart"]
+    },
+    {
+      "id": "edge.startup-boost", "page": "edge", "group": "edge", "recommended": true,
+      "registry": [
+        { "path": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge", "name": "StartupBoostEnabled", "value": 0 }
+      ]
+    },
+    {
+      "id": "edge.background", "page": "edge", "group": "edge", "recommended": true,
+      "registry": [
+        { "path": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge", "name": "BackgroundModeEnabled", "value": 0 }
+      ]
+    },
+    {
+      "id": "widgets.block", "page": "edge", "group": "widgets", "recommended": true,
+      "registry": [
+        { "path": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Dsh", "name": "AllowNewsAndInterests", "value": 0 },
+        { "path": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Dsh", "name": "DisableWidgetsBoard", "value": 1 }
+      ]
+    },
+    {
+      "id": "widgets.lockscreen", "page": "edge", "group": "widgets", "recommended": true,
+      "registry": [
+        { "path": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Dsh", "name": "DisableWidgetsOnLockScreen", "value": 1 }
+      ]
+    },
+
+    {
+      "id": "look.lock-tips", "page": "look", "group": "lock", "recommended": true,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "RotatingLockScreenOverlayEnabled", "value": 0 },
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "SubscribedContent-338387Enabled", "value": 0 }
+      ]
+    },
+    {
+      "id": "look.lock-spotlight", "page": "look", "group": "lock", "recommended": false,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "name": "RotatingLockScreenEnabled", "value": 0 }
+      ],
+      "actions": ["SetLockScreenPicture"]
+    },
+    {
+      "id": "look.desktop-default", "page": "look", "group": "desktop", "recommended": false,
+      "actions": ["SetDesktopPicture"]
+    },
+
+    {
+      "id": "gaming.gamebar-popups", "page": "apps", "group": "gaming", "recommended": false,
+      "registry": [
+        { "path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR", "name": "AppCaptureEnabled", "value": 0 },
+        { "path": "HKCU\\System\\GameConfigStore", "name": "GameDVR_Enabled", "value": 0 },
+        { "path": "HKCU\\Software\\Microsoft\\GameBar", "name": "UseNexusForGameBarEnabled", "value": 0 }
+      ]
+    },
+
+    {
+      "id": "onedrive.remove", "page": "onedrive", "group": "onedrive", "recommended": false,
+      "actions": ["RemoveOneDrive"]
+    }
+  ]
+}

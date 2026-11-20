@@ -1,0 +1,14 @@
+# Release builds
+dist/
+
+# Test output
+test/out/
+*.log
+
+# Editors and Windows
+.vscode/
+Thumbs.db
+desktop.ini
+
+# Built programs
+bin/

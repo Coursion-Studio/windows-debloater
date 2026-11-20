@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2 - 2026-11-20
+
+Open source again, with a sharper page.
+
+- Windows Debloater is open source under the MIT licence again, as it was up to 0.4.0, and its code is back in the public repository. Version 0.4.1 was published under Coursion Studio's own licence.
+- Setup and Settings say so, and both still show the licence.
+- The pictures on the project page are drawn at twice the size, as windows with their corners and shadow, and the page opens with a banner.
+
 ## 0.4.1 - 2026-11-20
 
 The licence changes, and the tool says who makes it.
