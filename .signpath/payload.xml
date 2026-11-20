@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "payload" (paste into SignPath under the project's
+  Artifact Configurations, slug: payload). The release workflow uploads a GitHub
+  artifact that holds:
+    WindowsDebloater.exe
+    src/*.ps1, src/*.psm1   the scripts the program runs, some of them elevated
+  Everything in it is signed; nothing else is sent. All scripts sit at the top of
+  src today. A script added in a subfolder would need an include here; the workflow
+  checks every signature and refuses a release with an unsigned script.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="WindowsDebloater.exe">
+      <authenticode-sign />
+    </pe-file>
+    <powershell-file-set>
+      <include path="src/*.ps1" min-matches="1" max-matches="unbounded" />
+      <include path="src/*.psm1" min-matches="1" max-matches="unbounded" />
+      <for-each>
+        <authenticode-sign />
+      </for-each>
+    </powershell-file-set>
+  </zip-file>
+</artifact-configuration>

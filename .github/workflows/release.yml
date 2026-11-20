@@ -1,0 +1,221 @@
+# Builds a release from a version tag (v1.2.3), entirely on GitHub, and leaves it as a
+# DRAFT release. Nothing is built on the maintainer's PC.
+#
+#   1. tests, then both programs are built from the tagged source
+#   2. code signing (only once SignPath has approved the project, see below):
+#        WindowsDebloater.exe and every .ps1/.psm1 under src are signed,
+#        the installer is built again around those signed files,
+#        then WindowsDebloaterSetup.exe itself is signed
+#   3. the zip, the installer and their .sha256 files are packaged and attached to a
+#      draft release
+#
+# update.json is NOT made here. It is signed with the private half of the update key,
+# which never leaves the maintainer's PC. After this workflow, the maintainer runs
+#
+#   powershell -ExecutionPolicy Bypass -File scripts\write-update-feed.ps1 -Tag v1.2.3
+#
+# which downloads the installer from the draft, signs it, and uploads update.json, and
+# then publishes the draft. See CODE_SIGNING_POLICY.md.
+#
+# ---------------------------------------------------------------- Code signing switch
+#
+# Code signing is done by SignPath (free code signing for open source, certificate by
+# SignPath Foundation). It is OFF until the project is approved. To turn it on, in the
+# repository's Settings > Secrets and variables > Actions:
+#
+#   variable  SIGNING                       signpath
+#   variable  SIGNPATH_ORGANIZATION_ID      the organization id SignPath gives
+#   variable  SIGNPATH_PROJECT_SLUG         windows-debloater
+#   variable  SIGNPATH_SIGNING_POLICY_SLUG  release-signing
+#   secret    SIGNPATH_API_TOKEN            the CI user's API token from SignPath
+#
+# and in SignPath create the two artifact configurations kept in .signpath\, with the
+# slugs "payload" and "installer". While SIGNING is anything else, every signing step
+# below is skipped and the release is built unsigned.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the draft release
+  actions: read     # SignPath reads the workflow run and downloads the artifacts to sign
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+    env:
+      SIGN: ${{ vars.SIGNING == 'signpath' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches src\version.txt
+        run: |
+          $version = (Get-Content -LiteralPath src\version.txt -Raw).Trim()
+          if ('${{ github.ref_name }}' -ne "v$version") { throw "Tag ${{ github.ref_name }} does not match src\version.txt ($version)." }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          if ($env:SIGN -eq 'true') { 'Code signing: SignPath' } else { 'Code signing: off (repository variable SIGNING is not "signpath")' }
+
+      - name: Tests
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File test\Run-Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Tests failed ($LASTEXITCODE)." }
+
+      - name: Build the programs
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-exe.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Build failed ($LASTEXITCODE)." }
+
+      # ============================================================ SIGNING PLACEHOLDER
+      # Skipped until SignPath approves the project and vars.SIGNING is "signpath".
+
+      # --- 1. The program and the scripts it runs (elevated): WindowsDebloater.exe,
+      #        src\**\*.ps1, src\**\*.psm1. Artifact configuration: .signpath\payload.xml
+      - name: 'Signing: collect the program and scripts'
+        if: vars.SIGNING == 'signpath'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = 'signing\payload'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item bin\WindowsDebloater.exe $stage
+          Get-ChildItem src -Recurse -File -Include *.ps1, *.psm1 | ForEach-Object {
+            $relative = $_.FullName.Substring((Resolve-Path src).Path.Length + 1)
+            $target = Join-Path "$stage\src" $relative
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+            Copy-Item $_.FullName $target
+          }
+          Get-ChildItem $stage -Recurse -File | ForEach-Object { $_.FullName }
+
+      - name: 'Signing: upload the program and scripts'
+        id: payload-unsigned
+        if: vars.SIGNING == 'signpath'
+        uses: actions/upload-artifact@v4
+        with:
+          name: payload-unsigned
+          path: signing/payload
+          if-no-files-found: error
+
+      - name: 'Signing: sign the program and scripts (SignPath)'
+        if: vars.SIGNING == 'signpath'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: payload
+          github-artifact-id: ${{ steps.payload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signing/payload-signed
+
+      - name: 'Signing: put the signed program and scripts in place'
+        if: vars.SIGNING == 'signpath'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item signing\payload-signed\WindowsDebloater.exe bin\WindowsDebloater.exe -Force
+          # File by file, so each signed script lands exactly where its unsigned one was.
+          $signedRoot = (Resolve-Path signing\payload-signed\src).Path
+          $count = 0
+          Get-ChildItem $signedRoot -Recurse -File | ForEach-Object {
+            $target = Join-Path src $_.FullName.Substring($signedRoot.Length + 1)
+            if (-not (Test-Path -LiteralPath $target)) { throw "SignPath returned $target, which was not sent." }
+            Copy-Item -LiteralPath $_.FullName -Destination $target -Force
+            $count++
+          }
+          $sent = @(Get-ChildItem signing\payload\src -Recurse -File).Count
+          if ($count -ne $sent) { throw "Sent $sent scripts to sign, got $count back." }
+
+      # --- 2. The installer, built again around the signed program and scripts.
+      - name: 'Signing: build the installer again with the signed files inside'
+        if: vars.SIGNING == 'signpath'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-exe.ps1 -SetupOnly
+          if ($LASTEXITCODE -ne 0) { throw "Building the installer failed ($LASTEXITCODE)." }
+          New-Item -ItemType Directory -Force -Path signing\installer | Out-Null
+          Copy-Item bin\WindowsDebloaterSetup.exe signing\installer
+
+      # --- 3. WindowsDebloaterSetup.exe. Artifact configuration: .signpath\installer.xml
+      - name: 'Signing: upload the installer'
+        id: installer-unsigned
+        if: vars.SIGNING == 'signpath'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-unsigned
+          path: signing/installer
+          if-no-files-found: error
+
+      - name: 'Signing: sign the installer (SignPath)'
+        if: vars.SIGNING == 'signpath'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.installer-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signing/installer-signed
+
+      - name: 'Signing: put the signed installer in place and check every signature'
+        if: vars.SIGNING == 'signpath'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item signing\installer-signed\WindowsDebloaterSetup.exe bin\WindowsDebloaterSetup.exe -Force
+          $files = @('bin\WindowsDebloater.exe', 'bin\WindowsDebloaterSetup.exe') +
+                   @(Get-ChildItem src -Recurse -File -Include *.ps1, *.psm1 | ForEach-Object { $_.FullName })
+          $bad = 0
+          foreach ($file in $files) {
+            $s = Get-AuthenticodeSignature -LiteralPath $file
+            '{0,-8} {1}  {2}' -f $s.Status, $file, $s.SignerCertificate.Subject
+            if ($s.Status -ne 'Valid' -or -not $s.TimeStamperCertificate) { $bad++ }
+          }
+          if ($bad) { throw "$bad file(s) are not validly signed with a timestamp." }
+
+      # ======================================================== END SIGNING PLACEHOLDER
+
+      - name: Package
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-release.ps1 -Prebuilt -NoFeed
+          if ($LASTEXITCODE -ne 0) { throw "Packaging failed ($LASTEXITCODE)." }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-debloater-${{ env.VERSION }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The points under this version's heading in CHANGELOG.md.
+          $lines = Get-Content CHANGELOG.md
+          $start = [array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match ('^## ' + [regex]::Escape($env:VERSION) + '\b') })
+          if ($start -lt 0) { throw "CHANGELOG.md has no heading for $env:VERSION." }
+          $body = @()
+          for ($i = $start + 1; $i -lt $lines.Count -and $lines[$i] -notmatch '^## '; $i++) { $body += $lines[$i] }
+          $signed = if ($env:SIGN -eq 'true') { 'Code-signed via SignPath (certificate by SignPath Foundation).' } else { 'Not code-signed.' }
+          $body += '', '---', "Built by GitHub Actions from ${{ github.sha }}. $signed",
+                   'update.json is added by the maintainer before this draft is published.'
+          [IO.File]::WriteAllText("$PWD\release-notes.md", ($body -join "`n"), (New-Object Text.UTF8Encoding($false)))
+          $assets = @(Get-ChildItem dist -File | ForEach-Object { $_.FullName })
+          & gh release create '${{ github.ref_name }}' @assets --draft --verify-tag --title "Windows Debloater $env:VERSION" --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'Creating the draft release failed.' }

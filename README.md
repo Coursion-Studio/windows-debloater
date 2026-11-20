@@ -218,6 +218,7 @@ The tests change nothing on the PC apart from a scratch registry key they create
 | `setup/` | `WindowsDebloaterSetup.exe`: install, update and uninstall. |
 | `scripts/` | Building the programs, the release, the README pictures and the film at the top of this page. |
 | `test/` | The tests, and one that applies every setting for real inside Windows Sandbox. |
+| `.github/workflows/` | CI on every push, and the release build that runs on version tags. |
 
 How it works: the window never changes the PC itself. It writes a plan and starts hidden PowerShell workers, one without elevation for per-user changes and one elevated for machine-wide settings. Each worker reports progress as lines of JSON and records every change before making it, which is what Revert reads.
 
@@ -230,4 +231,6 @@ Open an issue on this repo, or email [support@coursion.studio](mailto:support@co
 ## 📄 Licence
 
 MIT. See [LICENSE.md](LICENSE.md). © 2026 Coursion Studio.
+
+Releases are built from this source by GitHub Actions. Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). The application is pending, and releases stay unsigned until it is approved. See the [code signing policy](CODE_SIGNING_POLICY.md).
 Questions: [support@coursion.studio](mailto:support@coursion.studio) · [coursion.studio](https://coursion.studio)

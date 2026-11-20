@@ -1,0 +1,48 @@
+# Every push and pull request: run the tests, then build both programs and package a
+# release the way release.yml does, without code signing and without update.json.
+# The packaged files are kept as a workflow artifact for a week, for trying out.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        # The tool runs on Windows PowerShell 5.1, so it is tested and built with it.
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tests
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File test\Run-Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Tests failed ($LASTEXITCODE)." }
+
+      - name: Build and package (unsigned, no update feed)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-release.ps1 -NoFeed
+          if ($LASTEXITCODE -ne 0) { throw "Packaging failed ($LASTEXITCODE)." }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-debloater-unsigned
+          path: dist/*
+          retention-days: 7
+          if-no-files-found: error
