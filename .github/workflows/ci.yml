@@ -1,6 +1,9 @@
-# Every push and pull request: run the tests, then build both programs and package a
-# release the way release.yml does, without code signing and without update.json.
-# The packaged files are kept as a workflow artifact for a week, for trying out.
+# Every push and pull request: run the tests, then build both programs, unsigned.
+# The programs are kept as a workflow artifact for a week, for trying out.
+#
+# Releases are not built here. They are built and code-signed on the maintainer's PC
+# with scripts\build-release.ps1, because the code-signing certificate and the update
+# key both stay there.
 
 name: CI
 
@@ -34,15 +37,17 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File test\Run-Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw "Tests failed ($LASTEXITCODE)." }
 
-      - name: Build and package (unsigned, no update feed)
+      - name: Build (unsigned)
         run: |
           $ErrorActionPreference = 'Stop'
-          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-release.ps1 -NoFeed
-          if ($LASTEXITCODE -ne 0) { throw "Packaging failed ($LASTEXITCODE)." }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-exe.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Build failed ($LASTEXITCODE)." }
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-debloater-unsigned
-          path: dist/*
+          path: |
+            bin/WindowsDebloater.exe
+            bin/WindowsDebloaterSetup.exe
           retention-days: 7
           if-no-files-found: error

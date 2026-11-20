@@ -7,14 +7,6 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\build-exe.ps1
 #
 # The version comes from src\version.txt.
-#
-#   -SetupOnly   build only the installer, around the bin\WindowsDebloater.exe and
-#                the src folder that are there already. The release workflow on
-#                GitHub uses it: it has the program and the scripts code-signed
-#                first, then packs those signed files into the installer.
-#                See CODE_SIGNING_POLICY.md.
-
-param([switch]$SetupOnly)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -70,13 +62,8 @@ function Invoke-Compiler {
 $appExe = Join-Path $bin 'WindowsDebloater.exe'
 $appVersion = Join-Path $obj 'AppVersion.cs'
 New-VersionFile $appVersion 'Windows Debloater' 'A clean start for Windows 11'
-if ($SetupOnly) {
-    if (-not (Test-Path -LiteralPath $appExe)) { throw "-SetupOnly packs the program that is already built, and $appExe is not there." }
-    Write-Host "Using $appExe as it is"
-} else {
-    Invoke-Compiler $appExe @("/r:$automation", '/r:System.dll', '/r:System.Core.dll', $appVersion, (Join-Path $root 'exe\WindowsDebloater.cs'))
-    Write-Host "Built $appExe"
-}
+Invoke-Compiler $appExe @("/r:$automation", '/r:System.dll', '/r:System.Core.dll', $appVersion, (Join-Path $root 'exe\WindowsDebloater.cs'))
+Write-Host "Built $appExe"
 
 # ---------------------------------------------------------------- The installer
 
