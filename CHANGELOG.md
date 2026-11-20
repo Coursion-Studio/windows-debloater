@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 - 2026-11-20
+
+The licence changes, and the tool says who makes it.
+
+- From this version on, Windows Debloater comes under Coursion Studio's own licence. It is in `LICENSE.md`, and one click away in Setup and in Settings. Versions up to 0.4.0 were published under the MIT licence.
+- Setup says that installing means agreeing to the licence, and shows the licence right there.
+- Settings > About shows the copyright, the licence, the website and the support address.
+- The zip now carries the README written for people who use the tool.
+
 ## 0.4.0 - 2026-11-20
 
 A real program with an installer, Revert, and updates over the air.

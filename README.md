@@ -8,7 +8,7 @@
   <a href="https://github.com/Coursion-Studio/windows-debloater/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Coursion-Studio/windows-debloater/total?style=flat-square&color=e04a8b"></a>
   <img alt="Windows 11" src="https://img.shields.io/badge/Windows-11-0078d4?style=flat-square&logo=windows">
   <img alt="No admin needed to install" src="https://img.shields.io/badge/install-no%20admin%20needed-2ecc71?style=flat-square">
-  <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-4b0082?style=flat-square"></a>
+  <a href="LICENSE.md"><img alt="Proprietary licence" src="https://img.shields.io/badge/licence-proprietary-4b0082?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -185,5 +185,5 @@ The source code lives in a private repo. This one hosts the releases, the update
 
 ## 📄 Licence
 
-MIT. See [LICENSE](LICENSE). © 2026 Coursion Studio.
+Proprietary. See [LICENSE.md](LICENSE.md). © 2026 Coursion Studio. All rights reserved.
 Questions: [support@coursion.studio](mailto:support@coursion.studio) · [coursion.studio](https://coursion.studio)
