@@ -44,6 +44,8 @@ if (-not $report.ok) { throw ('The walk through the window failed: ' + $report.e
 $stages = [ordered]@{
     'home.png'         = 'home.png'
     'page-apps.png'    = 'apps.png'
+    'select-list.png'  = 'selections.png'
+    'select-use.png'   = 'selection-file.png'
     'confirm.png'      = 'confirm.png'
     'progress.png'     = 'progress.png'
     'home-done.png'    = 'home-done.png'

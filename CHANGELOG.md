@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 - 2026-11-21
+
+Your picks, kept.
+
+- What you ticked can be saved under a name. A box on the overview names the selection in use and lists them all: the recommended changes, everything, and the ones you saved.
+- A saved selection can be written to a file and opened on another PC. Before it is used, the tool says what will be ticked there and what is left out because it is not on that PC or already done.
+- The tool opens with what you left ticked. What you unticked stays unticked, and a recommended change that is new in a later version is still ticked for you.
+- The switch for the optional items is gone from the overview: it is "Everything" in the list of selections now.
+
 ## 0.4.2 - 2026-11-20
 
 Open source again, with a sharper page.

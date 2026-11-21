@@ -72,7 +72,7 @@ What Windows 11 does as it comes, and what is left after one press of **Debloat*
 | **Tips and nags** | Tips, welcome screens after updates, "finish setting up your device". | Off. |
 | **Advertising** | An advertising ID apps can read, and ads tailored from diagnostic data. | Both off. |
 
-That is the recommended selection: 40 changes, ticked when the tool opens. Another 23 are there if you want them and are never applied unless you tick them.
+That is the recommended selection: 40 changes, ticked the first time the tool opens. Another 23 are there if you want them and are never applied unless you tick them.
 
 <details>
 <summary><b>The 23 optional changes</b></summary>
@@ -91,8 +91,9 @@ No promises about speed, memory or disk space: none of that has been measured. W
 
 |   |   |
 |---|---|
-| 🧹 **One button** | **Debloat** applies everything that is ticked, in every area, after one confirmation. The recommended changes are ticked when the tool opens. |
+| 🧹 **One button** | **Debloat** applies everything that is ticked, in every area, after one confirmation. The recommended changes are ticked the first time; after that it opens with what you left ticked. |
 | ✅ **You confirm first** | A short summary says what will happen. Nothing changes until you press **Debloat now**. |
+| 📋 **Saved selections** | Save what you ticked under a name, switch between selections on the overview, and take one to another PC as a small file. |
 | ↩️ **Revert** | Undo a whole run: settings go back to the values they had, the apps it removed come back, and OneDrive is installed again. |
 | 🔍 **Nothing hidden** | Every item has a **What this changes** line with the exact app package or registry value. The complete list is in [docs/changes.md](docs/changes.md), and the code is all here. |
 | 📦 **Only what is there** | It looks at your PC first and lists only the apps and settings it actually finds. |
@@ -112,6 +113,13 @@ A row opens its area, where you choose exactly what is ticked. Before anything h
 <p align="center">
   <img src="docs/img/apps.png" width="49%" alt="An area page: the preinstalled apps found on this PC">
   <img src="docs/img/confirm.png" width="49%" alt="The summary to confirm before anything changes">
+</p>
+
+The **Selection** box on the overview names what is ticked and lists every selection: the recommended changes, everything, and the ones you saved. A selection saved on another PC is shown before it is used, with what fits this one.
+
+<p align="center">
+  <img src="docs/img/selections.png" width="49%" alt="The list of selections: Recommended, Everything and two saved ones">
+  <img src="docs/img/selection-file.png" width="49%" alt="A selection file from another PC, shown before it is used">
 </p>
 
 While it works, each area is a lane that fills up. Afterwards the overview shows what is in place, with **Revert** to undo the run.
@@ -136,7 +144,7 @@ Revert says what comes back before it starts, and a newer version announces itse
 | Go back to the recommended selection | <kbd>Ctrl</kbd>+<kbd>R</kbd> |
 | Tick everything in the current area | <kbd>Ctrl</kbd>+<kbd>A</kbd> |
 | Search the current area | <kbd>Ctrl</kbd>+<kbd>F</kbd> |
-| Close the confirmation, clear the search box, or return to the overview | <kbd>Esc</kbd> |
+| Close the confirmation or the list of selections, clear the search box, or return to the overview | <kbd>Esc</kbd> |
 
 ## ❓ FAQ
 
@@ -144,6 +152,12 @@ Revert says what comes back before it starts, and a newer version announces itse
 <summary><b>Can I undo it?</b></summary>
 
 Yes. Press **Revert** on the overview after a run, or open **History** and press **Revert** on any earlier run. Settings always go back to the values they had. Apps come back from the copy Windows itself keeps; if Windows no longer has one, History has a link to that app in the Microsoft Store. OneDrive is installed again, but your folders are not moved back into it: that is yours to choose in OneDrive after signing in.
+</details>
+
+<details>
+<summary><b>Can I use the same picks on another PC?</b></summary>
+
+Yes. On the overview, open the **Selection** box and choose **Save this selection...**, give it a name and switch on **Also save it as a file**. Copy that file to the other PC, and there choose **Selection → Open a selection file...**. The tool shows what will be ticked and what is left out, because an app is not installed there or a change is already done. Nothing changes until you press **Debloat**. The file lists the changes and the name you gave it, nothing about you or your PC.
 </details>
 
 <details>
@@ -185,7 +199,7 @@ Yes. Press <kbd>Win</kbd>+<kbd>R</kbd> and run `"%LocalAppData%\Programs\Windows
 <details>
 <summary><b>Where does it keep its files?</b></summary>
 
-The program is in `%LocalAppData%\Programs\WindowsDebloater`. Its history, with the old value of every setting it changed, is in `%LocalAppData%\WindowsDebloater`; that is what Revert reads.
+The program is in `%LocalAppData%\Programs\WindowsDebloater`. Its history, with the old value of every setting it changed, is in `%LocalAppData%\WindowsDebloater`; that is what Revert reads. Your saved selections and what you last ticked are there too.
 </details>
 
 <details>

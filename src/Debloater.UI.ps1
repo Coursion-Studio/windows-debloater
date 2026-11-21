@@ -3033,14 +3033,31 @@ function Invoke-TestSelections {
     if ($script:Mode -ne 'browse' -or $script:Choice.Kind -ne 'saved' -or [string]$ui.BtnSelection.Content -ne 'Gaming PC') { throw 'Saving did not take the selection into use under its name.' }
     if (@(Get-SelectedIds).Count -ne $Everything) { throw 'Saving a selection changed what is ticked.' }
 
-    # A file from another PC: shown first, with what fits here, then taken into use.
+    # A file from another PC: shown first, with what fits here, then taken into use. For
+    # that first look this PC is made to lack three of the things the file lists and to
+    # have two of them in place already, the way a real second PC would.
     $file = Join-Path $Dir 'laptop.debloat.json'
-    $some = @(Get-TodoItems | Select-Object -First 5 | ForEach-Object { $_.Id })
-    Export-DebloaterSelection -Name "Mum's laptop" -Ids ($some + 'not.in-this-version') -Path $file
-    Open-SelectionFile $file
-    if ($script:Mode -ne 'confirm' -or $ui.ConfirmRows.Items.Count -ne 2) { throw 'A selection file was not laid out before it was used.' }
-    Save-DebloaterScreenshot (Join-Path $Dir 'select-use.png')
-    Invoke-TestClick $ui.BtnConfirmCancel
+    $some = @(Get-TodoItems | Select-Object -First 10 | ForEach-Object { $_.Id })
+    Export-DebloaterSelection -Name "Mum's laptop" -Ids $some -Path $file
+    $away = @()
+    $inPlace = @()
+    if ($some.Count -eq 10) { $away = @($some[5..7]); $inPlace = @($some[8..9]) }
+    $real = @{}
+    foreach ($id in ($away + $inPlace)) { $real[$id] = $script:State[$id] }
+    try {
+        foreach ($id in $away) { $script:State[$id] = [pscustomobject]@{ State = 'absent' } }
+        foreach ($id in $inPlace) { $script:State[$id] = [pscustomobject]@{ State = 'done' } }
+        Open-SelectionFile $file
+        if ($script:Mode -ne 'confirm' -or $ui.ConfirmRows.Items.Count -lt 1) { throw 'A selection file was not laid out before it was used.' }
+        if ($away.Count -gt 0) {
+            $why = (TN 'select.use.left.missing' $away.Count) + ', ' + (TN 'select.use.left.done' $inPlace.Count) + '.'
+            if ($ui.ConfirmRows.Items.Count -ne 2 -or [string]$ui.ConfirmRows.Items[1].Note -ne $why) { throw 'The sheet did not say what a selection file leaves out here, and why.' }
+        }
+        Save-DebloaterScreenshot (Join-Path $Dir 'select-use.png')
+        Invoke-TestClick $ui.BtnConfirmCancel
+    } finally {
+        foreach ($id in @($real.Keys)) { $script:State[$id] = $real[$id] }
+    }
     if ($script:Choice.Name -ne 'Gaming PC' -or @(Get-SavedSelections).Count -ne 1) { throw 'Cancel did not leave things as they were.' }
     Open-SelectionFile $file
     Invoke-TestClick $ui.BtnConfirmGo
