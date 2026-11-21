@@ -319,6 +319,130 @@ Check 'history reports what each run got done' {
     Remove-Item -LiteralPath $runDir -Recurse -Force
 }
 
+# ---------------------------------------------------------------- Selections
+
+$recommendedIds = @($catalog | Where-Object { $_.Recommended } | ForEach-Object { $_.Id })
+$optionalIds = @($catalog | Where-Object { -not $_.Recommended } | ForEach-Object { $_.Id })
+
+Check 'a selection is kept under a name and read back as it was saved' {
+    $saved = $env:DEBLOATER_DATA
+    $env:DEBLOATER_DATA = Join-Path $temp 'selection-data'
+    try {
+        Assert (@(Get-DebloaterSelections).Count -eq 0) 'there were saved selections before any was saved'
+        $first = [pscustomobject]@{ Name = 'Gaming PC'; Saved = '2026-11-21'; Ids = @($recommendedIds[0], $optionalIds[0], 'not an id!', $recommendedIds[0]) }
+        $second = [pscustomobject]@{ Name = 'One thing'; Saved = '2026-11-22'; Ids = @($optionalIds[1]) }
+        Save-DebloaterSelections @($first, $second)
+        $back = @(Get-DebloaterSelections)
+        Assert ($back.Count -eq 2 -and $back[0].Name -eq 'Gaming PC' -and $back[1].Name -eq 'One thing') 'the two selections did not come back in the order they were saved'
+        Assert ((@($back[0].Ids) -join ',') -eq ($recommendedIds[0] + ',' + $optionalIds[0])) ('something that is no id, or an id twice, was kept: ' + (@($back[0].Ids) -join ','))
+        Assert (@($back[1].Ids).Count -eq 1 -and $back[1].Saved -eq '2026-11-22') 'a selection of one item did not come back as one item'
+        Save-DebloaterSelections @($second)
+        Assert (@(Get-DebloaterSelections).Count -eq 1) 'a selection of one was not read back as one'
+        Save-DebloaterSelections @()
+        Assert (@(Get-DebloaterSelections).Count -eq 0) 'the last selection could not be taken away'
+
+        Assert ((ConvertTo-DebloaterSelectionName ("  Gaming`tPC`r`n ")) -eq 'Gaming PC') 'a name was not tidied'
+        Assert ((ConvertTo-DebloaterSelectionName ('x' * 90)).Length -eq 40) 'a name could be longer than 40 characters'
+        [IO.File]::WriteAllText((Get-DebloaterSelectionsPath), 'this is not json')
+        Assert (@(Get-DebloaterSelections).Count -eq 0) 'a damaged file of selections was not read as none'
+    } finally { $env:DEBLOATER_DATA = $saved }
+}
+
+Check 'a selection file is written and read back, names nobody, and anything else is refused' {
+    $folder = Join-Path $temp 'selection-files'
+    [void](New-Item -ItemType Directory -Force -Path $folder)
+    $file = Join-Path $folder 'Gaming PC.debloat.json'
+    Export-DebloaterSelection -Name ' Gaming  PC ' -Ids @($recommendedIds[0], $optionalIds[0]) -Path $file
+    $text = [IO.File]::ReadAllText($file)
+    foreach ($private in @($env:COMPUTERNAME, $env:USERNAME) | Where-Object { $_ -and $_.Length -gt 2 }) {
+        Assert ($text.IndexOf($private, [StringComparison]::OrdinalIgnoreCase) -lt 0) 'the file names this PC or its user'
+    }
+    $read = Import-DebloaterSelection $file
+    Assert ($read.Name -eq 'Gaming PC' -and (@($read.Ids) -join ',') -eq ($recommendedIds[0] + ',' + $optionalIds[0])) 'the file did not come back as it was written'
+    Assert ($read.Version -eq (Get-DebloaterVersion) -and $read.Saved -eq (Get-Date).ToString('yyyy-MM-dd')) 'the file does not say when and with which version it was saved'
+
+    $refused = @{
+        'select.fail.empty'  = @('{"app":"Windows Debloater","kind":"selection","ids":[]}', '{"app":"Windows Debloater","kind":"selection","ids":["no id at all!"]}')
+        'select.fail.format' = @('{"app":"Windows Debloater","kind":"settings","ids":["a.b"]}', '{"app":"Something else","kind":"selection","ids":["a.b"]}',
+            'not json', '[1, 2]', ('{"app":"Windows Debloater","kind":"selection","ids":["a.b"],"pad":"' + ('x' * 300000) + '"}'))
+    }
+    foreach ($reason in $refused.Keys) {
+        foreach ($content in $refused[$reason]) {
+            $bad = Join-Path $folder 'bad.json'
+            [IO.File]::WriteAllText($bad, $content)
+            $said = ''
+            try { [void](Import-DebloaterSelection $bad) } catch { $said = $_.Exception.Message }
+            Assert ($said -eq $reason) ('expected ' + $reason + ', got "' + $said + '" for: ' + $content.Substring(0, [Math]::Min(60, $content.Length)))
+        }
+    }
+    $said = ''
+    try { [void](Import-DebloaterSelection (Join-Path $folder 'not-there.json')) } catch { $said = $_.Exception.Message }
+    Assert ($said -eq 'select.fail.missing') 'a file that is not there was not refused as such'
+    # A file with no name in it takes the name of the file.
+    [IO.File]::WriteAllText((Join-Path $folder 'Laptop.json'), '{"app":"Windows Debloater","kind":"selection","ids":["a.b"]}')
+    Assert ((Import-DebloaterSelection (Join-Path $folder 'Laptop.json')).Name -eq 'Laptop') 'a file without a name did not take its file name'
+}
+
+Check 'what was ticked is remembered, and what is new and recommended is ticked for someone who chose by hand' {
+    $all = @($catalog | ForEach-Object { $_.Id })
+    $default = Resolve-DebloaterSelection $null $catalog @()
+    Assert ($default.Kind -eq 'recommended' -and @($default.Ids).Count -eq $recommendedIds.Count) 'with nothing remembered, the recommended list is not the choice'
+    $every = Resolve-DebloaterSelection ([pscustomobject]@{ kind = 'everything' }) $catalog @()
+    Assert ($every.Kind -eq 'everything' -and @($every.Ids).Count -eq $all.Count) 'everything is not everything'
+
+    $mine = [pscustomobject]@{ Name = 'Mine'; Saved = ''; Ids = @($optionalIds[0]) }
+    $named = Resolve-DebloaterSelection ([pscustomobject]@{ kind = 'saved'; name = 'Mine'; ids = @($all); known = @($all) }) $catalog @($mine)
+    Assert ($named.Kind -eq 'saved' -and $named.Name -eq 'Mine' -and (@($named.Ids) -join ',') -eq $optionalIds[0]) 'a saved selection is not exactly its own list'
+    $gone = Resolve-DebloaterSelection ([pscustomobject]@{ kind = 'saved'; name = 'Deleted'; ids = @($optionalIds[1]); known = @($all) }) $catalog @($mine)
+    Assert ($gone.Kind -eq 'custom' -and (@($gone.Ids) -join ',') -eq $optionalIds[1]) 'a saved selection that is gone did not leave its ticks behind'
+
+    # Chosen by hand in a version that did not have the first recommended item yet:
+    # that one is ticked, and the recommended one that was unticked stays unticked.
+    $knownThen = @($all | Where-Object { $_ -ne $recommendedIds[0] })
+    $hand = Resolve-DebloaterSelection ([pscustomobject]@{ kind = 'custom'; ids = @($recommendedIds[2], $optionalIds[0]); known = $knownThen }) $catalog @()
+    Assert ($hand.Kind -eq 'custom') 'ticks made by hand lost their kind'
+    Assert (@($hand.Ids) -contains $recommendedIds[0]) 'a recommended item that is new was not ticked'
+    Assert (@($hand.Ids) -notcontains $recommendedIds[1]) 'a recommended item that had been unticked came back ticked'
+    Assert (@($hand.Ids) -contains $optionalIds[0] -and @($hand.Ids).Count -eq 3) ('the ticks made by hand were not kept as they were: ' + (@($hand.Ids) -join ','))
+
+    # It survives the settings file, and a settings file from before this is read as "nothing remembered".
+    $saved = $env:DEBLOATER_DATA
+    $env:DEBLOATER_DATA = Join-Path $temp 'selection-settings'
+    try {
+        Save-DebloaterSettings ([pscustomobject]@{ lang = 'en'; theme = 'dark'; selection = [pscustomobject]@{ kind = 'custom'; name = ''; ids = @($optionalIds[0]); known = @($all) } })
+        $settings = Get-DebloaterSettings
+        Assert ($settings.selection.kind -eq 'custom' -and (@($settings.selection.ids) -join ',') -eq $optionalIds[0] -and @($settings.selection.known).Count -eq $all.Count) 'the choice did not survive the settings file'
+        Save-DebloaterSettings ([pscustomobject]@{ lang = 'en'; theme = 'dark' })
+        Assert ($null -eq (Get-DebloaterSettings).selection) 'a settings file without a choice was read as having one'
+        Save-DebloaterSettings ([pscustomobject]@{ lang = 'en'; selection = [pscustomobject]@{ kind = 'nonsense'; ids = @('a.b') } })
+        Assert ($null -eq (Get-DebloaterSettings).selection) 'a choice of a kind that does not exist was taken over'
+    } finally { $env:DEBLOATER_DATA = $saved }
+}
+
+Check 'a selection from another PC is fitted to this one' {
+    $states = @{}
+    $states[$recommendedIds[0]] = [pscustomobject]@{ State = 'todo' }
+    $states[$recommendedIds[1]] = [pscustomobject]@{ State = 'todo' }
+    $states[$recommendedIds[2]] = [pscustomobject]@{ State = 'done' }
+    $states[$optionalIds[0]] = [pscustomobject]@{ State = 'absent' }
+    $fit = Get-DebloaterSelectionFit @($recommendedIds[0], $recommendedIds[1], $recommendedIds[2], $optionalIds[0], $optionalIds[1], 'from.a-later-version') $catalog $states
+    Assert ((@($fit.Ticked) -join ',') -eq ($recommendedIds[0] + ',' + $recommendedIds[1])) 'what can be done here was not what gets ticked'
+    Assert ((@($fit.Done) -join ',') -eq $recommendedIds[2]) 'what is already done was not set aside'
+    Assert (@($fit.Missing).Count -eq 2) 'what is not on this PC was not set aside'
+    Assert ((@($fit.Unknown) -join ',') -eq 'from.a-later-version') 'an item this version does not know was not set aside'
+}
+
+# The window's own walk never writes settings, so what it remembers from one sitting to
+# the next is played through by a script of its own, without a window.
+Check 'the window opens with the ticks it was closed with' {
+    $saved = $env:DEBLOATER_DATA
+    $env:DEBLOATER_DATA = Join-Path $temp 'remembered-data'
+    try {
+        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Test-RememberedTicks.ps1') 2>&1 | ForEach-Object { [string]$_ })
+    } finally { $env:DEBLOATER_DATA = $saved }
+    Assert ($LASTEXITCODE -eq 0 -and $output.Count -gt 0 -and $output[-1] -eq 'OK') ('it said: ' + ($output -join ' '))
+}
+
 Check 'every page has an icon' {
     foreach ($name in 'overview', 'apps', 'ads', 'edge', 'look', 'onedrive', 'history', 'settings') {
         Assert (Test-Path -LiteralPath (Join-Path $src ('ui\icons\' + $name + '.png'))) "missing ui\icons\$name.png (put it in design\icons and run scripts\import-icons.ps1)"
@@ -825,6 +949,7 @@ if (-not $SkipWindow) {
         Assert ([bool]$report.finishedHome) 'the overview never showed the finished board'
         Assert ($report.undone -gt 0) 'reverting a run was not exercised'
         Assert ([bool]$report.updateShown) 'the update pill and its sheet were not exercised'
+        Assert ([bool]$report.selectionsShown) 'choosing, saving and opening selections was not exercised'
         Assert (@(Get-ChildItem -LiteralPath $out -Filter '*.png').Count -ge 20) 'screenshots are missing'
     }
 }

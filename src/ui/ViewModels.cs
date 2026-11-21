@@ -222,6 +222,19 @@ namespace Debloater.Ui
         public bool IsChosen { get { return chosen; } set { if (chosen == value) return; chosen = value; Raise("IsChosen"); } }
     }
 
+    // One selection in the list on the overview: its name, how many changes it would
+    // tick on this PC, and whether it is the one in use. One that somebody saved can be
+    // renamed, written to a file or deleted, so it carries a button for that.
+    public class PickVm
+    {
+        public string Id { get; set; }
+        public string Title { get; set; }
+        public string Count { get; set; }
+        public bool IsChosen { get; set; }
+        public bool CanEdit { get; set; }
+        public string EditTip { get; set; }
+    }
+
     public static class Win32
     {
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]

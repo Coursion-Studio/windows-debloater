@@ -549,9 +549,8 @@ function Set-State {
             $script:State[$id] = [pscustomobject]@{ State = $value }
         }
     }
-    foreach ($id in @($script:Selected.Keys)) {
-        if (-not $script:State.ContainsKey($id) -or $script:State[$id].State -ne 'todo') { $script:Selected.Remove($id) }
-    }
+    # What is ticked is what is wanted and can be done on the PC as it is now.
+    Sync-Selection
 }
 
 # A text with a number in it. Uses the "<key>.one" wording for exactly one.
@@ -604,24 +603,20 @@ function Set-ItemsSelected {
     param($Items, [bool]$Value)
     foreach ($item in @($Items)) {
         if ($script:State[$item.Id].State -ne 'todo') { continue }
-        if ($Value) { $script:Selected[$item.Id] = $true } else { $script:Selected.Remove($item.Id) }
+        if ($Value) { $script:Selected[$item.Id] = $true; $script:Wanted[$item.Id] = $true }
+        else { $script:Selected.Remove($item.Id); $script:Wanted.Remove($item.Id) }
         $vm = $script:PageVms[$item.Id]
         if ($vm) { $vm.SetSelectedQuietly($Value) }
     }
+    Update-Choice
+    $script:ChoiceDirty = $true
     Update-Chrome
     Update-Bars
 }
 
 # The starting point: every recommended change ticked, nothing optional.
 function Reset-ToRecommended {
-    $script:Selected = @{}
-    foreach ($item in Get-TodoItems) {
-        if ($item.Recommended) { $script:Selected[$item.Id] = $true }
-        $vm = $script:PageVms[$item.Id]
-        if ($vm) { $vm.SetSelectedQuietly([bool]$item.Recommended) }
-    }
-    Update-Chrome
-    Update-Bars
+    Set-Choice 'recommended'
 }
 
 function New-ItemVm {
@@ -664,6 +659,13 @@ function Build-Nav {
     $script:RevertLabel = New-Object Debloater.Ui.NavVm
     $script:RevertLabel.Glyph = Glyph 0xE7A7
     $script:Ui.BtnHomeUndo.Content = $script:RevertLabel.PSObject.BaseObject
+    # So are the two actions at the foot of the list of selections.
+    $script:PickSaveLabel = New-Object Debloater.Ui.NavVm
+    $script:PickSaveLabel.Glyph = Glyph 0xE74E
+    $script:Ui.BtnPickSave.Content = $script:PickSaveLabel.PSObject.BaseObject
+    $script:PickOpenLabel = New-Object Debloater.Ui.NavVm
+    $script:PickOpenLabel.Glyph = Glyph 0xE8E5
+    $script:Ui.BtnPickOpen.Content = $script:PickOpenLabel.PSObject.BaseObject
 }
 
 # Texts that are not part of a single view: page names, the app's name, the mode tag.
@@ -703,6 +705,9 @@ function Get-BackText { return ([string][char]0x2039 + '  ' + (T 'btn.overview')
 
 function Show-Page {
     param([string]$Id)
+    # Ticks made by hand are written down on the way to the next page, so they are not
+    # lost with a window that never gets to close properly.
+    if ($script:ChoiceDirty) { Save-UiSettings }
     $script:CurrentPage = $Id
     $script:PageVms = @{}
     Select-NavEntry $Id
@@ -1031,12 +1036,13 @@ function Update-Bars {
         $ui.BtnDebloat.IsEnabled = ($count -gt 0)
         if ($resting -and $undoable) { $ui.BtnHomeUndo.Visibility = 'Visible' } else { $ui.BtnHomeUndo.Visibility = 'Collapsed' }
 
-        if ($optional.Count -gt 0) {
-            $ui.OptionalSwitch.Content = TN 'home.optional' $optional.Count
-            $ui.OptionalSwitch.IsChecked = (@($optional | Where-Object { -not $script:Selected[$_.Id] }).Count -eq 0)
-            $ui.OptionalSwitch.Visibility = 'Visible'
+        # The selection in use, for as long as there is anything to choose between.
+        if ($todo.Count -gt 0) {
+            $ui.SelectionLabel.Text = T 'select.label'
+            $ui.BtnSelection.Content = Get-ChoiceTitle
+            $ui.SelectionRow.Visibility = 'Visible'
         } else {
-            $ui.OptionalSwitch.Visibility = 'Collapsed'
+            $ui.SelectionRow.Visibility = 'Collapsed'
         }
     } elseif ($script:CategoryIds -contains $script:CurrentPage) {
         $onPage = @($selected | Where-Object { $_.Page -eq $script:CurrentPage }).Count
@@ -1192,6 +1198,7 @@ function Invoke-ConfirmGo {
         if ($action.Kind -eq 'update') { Start-UpdateInstall }
         return
     }
+    if ($action -and $action.Kind -like 'select-*') { Invoke-SelectionGo; return }
     Hide-Confirm
     if ($action -and $action.Kind -eq 'undo') {
         if ($action.Dir) { Start-UndoRun ([string]$action.Dir) } else { Start-DemoUndo }
@@ -1649,9 +1656,8 @@ function Complete-Run {
     $script:Mode = 'finishing'
     Show-RunFinished
     Start-StateScan {
-        # Ready for the next round: whatever is still recommended is ticked again.
-        $script:Selected = @{}
-        foreach ($item in Get-TodoItems) { if ($item.Recommended) { $script:Selected[$item.Id] = $true } }
+        # Ready for the next round: whatever is wanted and still to do is ticked again.
+        # (Taking over the new picture of the PC has already seen to that.)
         $script:Mode = 'result'
         $ui = $script:Ui
         $ui.BtnProgressDetails.Content = T 'btn.details'
@@ -1840,7 +1846,8 @@ function Build-Settings {
     Update-UpdateSettings ''
 }
 
-# Language, appearance and the size the window is at, so it opens the same way next time.
+# Language, appearance, the size the window is at and what is ticked, so it opens the
+# same way next time.
 function Save-UiSettings {
     if ($script:SelfTestDir) { return }
     $window = $script:Window
@@ -1850,10 +1857,15 @@ function Save-UiSettings {
     $width = [int]$window.ActualWidth
     $height = [int]$window.ActualHeight
     if ($window.WindowState -ne 'Normal' -and -not $bounds.IsEmpty) { $width = [int]$bounds.Width; $height = [int]$bounds.Height }
+    # What is ticked is remembered too. A demo's ticks are not real, and a window closed
+    # before it had looked at the PC has none, so both leave what was written before.
+    if ($script:ChoiceReady -and -not $script:Demo) { $script:StoredChoice = Get-ChoiceRecord }
     Save-DebloaterSettings ([pscustomobject]@{
         lang = (Get-DebloaterLanguage); theme = $script:Theme; width = $width; height = $height; maximized = $maximized
         updates = [bool]$script:UpdatesOn; updateChecked = [string]$script:UpdateChecked
+        selection = $script:StoredChoice
     })
+    $script:ChoiceDirty = $false
 }
 
 function Set-UiLanguage {
@@ -1862,6 +1874,508 @@ function Set-UiLanguage {
     Save-UiSettings
     Update-Chrome
     if ($script:Mode -eq 'browse') { Show-Page $script:CurrentPage }
+}
+
+# ================================================================ Selections
+#
+# What is ticked is where two things meet: what is wanted ($script:Wanted, item ids that
+# outlive a run) and what can be done on this PC right now. What is wanted is a choice:
+# the tool's recommended list, everything, a list saved under a name, or whatever was
+# ticked by hand. $script:Choice says which, the box on the overview shows it, and it
+# is written down when the window closes so that it opens with the same ticks.
+
+# The selections saved under a name. A demo and a test keep theirs in memory, so they
+# never touch the real ones.
+function Get-SavedSelections {
+    if ($null -eq $script:SavedSelections) {
+        if ($script:Demo -or $script:SelfTestDir) { $script:SavedSelections = @() }
+        else { $script:SavedSelections = @(Get-DebloaterSelections) }
+    }
+    return $script:SavedSelections
+}
+
+function Set-SavedSelections {
+    param($List)
+    $script:SavedSelections = @($List)
+    if (-not $script:Demo -and -not $script:SelfTestDir) {
+        try { Save-DebloaterSelections $script:SavedSelections } catch {}
+    }
+}
+
+# The ids one of the named choices stands for: 'recommended', 'everything', or 'saved'
+# with the name it was saved under.
+function Get-ChoiceIds {
+    param([string]$Kind, [string]$Name = '')
+    $choice = [pscustomobject]@{ kind = $Kind; name = $Name; ids = @(); known = @() }
+    return @((Resolve-DebloaterSelection $choice $script:Catalog @(Get-SavedSelections)).Ids)
+}
+
+# How many changes a choice would tick on this PC.
+function Get-ChoiceCount {
+    param([string]$Kind, [string]$Name = '')
+    return @(Get-ChoiceIds $Kind $Name | Where-Object { $script:State.ContainsKey($_) -and $script:State[$_].State -eq 'todo' }).Count
+}
+
+# Ticks what is wanted and can be done here, and nothing else.
+function Sync-Selection {
+    $script:Selected = @{}
+    foreach ($item in $script:Catalog) {
+        $on = ([bool]$script:Wanted[$item.Id] -and $script:State[$item.Id].State -eq 'todo')
+        if ($on) { $script:Selected[$item.Id] = $true }
+        $vm = $script:PageVms[$item.Id]
+        if ($vm) { $vm.SetSelectedQuietly($on) }
+    }
+}
+
+function Set-Wanted {
+    param($Ids)
+    $script:Wanted = @{}
+    foreach ($id in @($Ids)) { $script:Wanted[[string]$id] = $true }
+}
+
+# The choice the window opens with: the one it was closed with, or the recommended
+# list the first time. A demo and a test always start from the recommended list.
+function Initialize-Selection {
+    $stored = $null
+    if (-not $script:Demo -and -not $script:SelfTestDir) { $stored = $script:StoredChoice }
+    $resolved = Resolve-DebloaterSelection $stored $script:Catalog @(Get-SavedSelections)
+    $script:Choice = @{ Kind = [string]$resolved.Kind; Name = [string]$resolved.Name }
+    Set-Wanted $resolved.Ids
+    Sync-Selection
+    $script:ChoiceReady = $true
+}
+
+# Takes one of the named choices into use and shows the ticks it comes to.
+function Set-Choice {
+    param([string]$Kind, [string]$Name = '')
+    $resolved = Resolve-DebloaterSelection ([pscustomobject]@{ kind = $Kind; name = $Name; ids = @(); known = @() }) $script:Catalog @(Get-SavedSelections)
+    $script:Choice = @{ Kind = [string]$resolved.Kind; Name = [string]$resolved.Name }
+    Set-Wanted $resolved.Ids
+    Sync-Selection
+    Update-Chrome
+    if ($script:CurrentPage -eq 'home') { Build-Home } else { Update-Bars }
+    Save-UiSettings
+}
+
+# An item that says something about this PC: it can be done here, it is in place, or
+# this tool removed it. An app that was never installed says nothing either way.
+function Test-ItemRelevant {
+    param([string]$Id)
+    return ($script:State[$Id].State -in 'todo', 'done' -or [bool]$script:AppliedIds[$Id])
+}
+
+# The part of a list that matters on this PC, as one text, for telling two lists apart.
+function Get-WantedMark {
+    param($Ids)
+    $set = @{}
+    foreach ($id in @($Ids)) { $set[[string]$id] = $true }
+    return (@($script:Catalog | Where-Object { $set.ContainsKey($_.Id) -and (Test-ItemRelevant $_.Id) } | ForEach-Object { $_.Id }) -join '|')
+}
+
+# After something was ticked by hand: is what is wanted still one of the lists that
+# have a name? The one that was in use is asked first, so that it keeps its name for as
+# long as it fits. If none fits, what is wanted is simply the person's own.
+function Update-Choice {
+    $mine = Get-WantedMark @($script:Wanted.Keys)
+    $candidates = @()
+    if ($script:Choice.Kind -ne 'custom') { $candidates += , @([string]$script:Choice.Kind, [string]$script:Choice.Name) }
+    $candidates += , @('recommended', '')
+    $candidates += , @('everything', '')
+    foreach ($entry in @(Get-SavedSelections)) { $candidates += , @('saved', [string]$entry.Name) }
+    foreach ($candidate in $candidates) {
+        $ids = @(Get-ChoiceIds $candidate[0] $candidate[1])
+        if ((Get-WantedMark $ids) -ne $mine) { continue }
+        if ($script:Choice.Kind -ne $candidate[0] -or $script:Choice.Name -ne $candidate[1]) {
+            $script:Choice = @{ Kind = $candidate[0]; Name = $candidate[1] }
+            # The two lists differ only in things this PC says nothing about.
+            Set-Wanted $ids
+        }
+        return
+    }
+    $script:Choice = @{ Kind = 'custom'; Name = '' }
+}
+
+# The name the box on the overview shows.
+function Get-ChoiceTitle {
+    if ($script:Choice.Kind -eq 'saved') { return [string]$script:Choice.Name }
+    if ($script:Choice.Kind -in 'recommended', 'everything') { return (T ('select.' + $script:Choice.Kind)) }
+    return (T 'select.custom')
+}
+
+# What is written down about the choice when the window closes. "known" is every item
+# there was to choose from, so that a later version can tell what is new.
+function Get-ChoiceRecord {
+    return [pscustomobject]@{
+        kind = [string]$script:Choice.Kind; name = [string]$script:Choice.Name
+        ids = @($script:Wanted.Keys | Sort-Object)
+        known = @($script:Catalog | ForEach-Object { $_.Id })
+    }
+}
+
+# ---- The list under the box
+
+function Show-PickMenu {
+    if ($script:Mode -ne 'browse' -or $script:CurrentPage -ne 'home' -or $script:PickOpen) { return }
+    $ui = $script:Ui
+    $builtIn = New-Collection
+    foreach ($kind in 'recommended', 'everything') {
+        $row = New-Object Debloater.Ui.PickVm
+        $row.Id = $kind
+        $row.Title = T ('select.' + $kind)
+        $row.Count = [string](Get-ChoiceCount $kind)
+        $row.IsChosen = ($script:Choice.Kind -eq $kind)
+        $builtIn.Add($row)
+    }
+    $saved = New-Collection
+    foreach ($entry in @(Get-SavedSelections)) {
+        $row = New-Object Debloater.Ui.PickVm
+        $row.Id = 'saved:' + [string]$entry.Name
+        $row.Title = [string]$entry.Name
+        $row.Count = [string](Get-ChoiceCount 'saved' ([string]$entry.Name))
+        $row.IsChosen = ($script:Choice.Kind -eq 'saved' -and $script:Choice.Name -eq $entry.Name)
+        $row.CanEdit = $true
+        $row.EditTip = T 'select.edit.tip'
+        $saved.Add($row)
+    }
+    $ui.PickBuiltIn.ItemsSource = $builtIn
+    $ui.PickSaved.ItemsSource = $saved
+    $ui.PickSavedLabel.Text = Format-Caps (T 'select.saved')
+    if ($saved.Count -gt 0) { $ui.PickSavedBlock.Visibility = 'Visible' } else { $ui.PickSavedBlock.Visibility = 'Collapsed' }
+    $script:PickSaveLabel.Title = T 'select.save'
+    $script:PickOpenLabel.Title = T 'select.open'
+    $counts = Get-SaveCounts
+    $ui.BtnPickSave.IsEnabled = (($counts.Ticked + $counts.InPlace) -gt 0)
+
+    # Under the box, with its right edge on the box's, and never past the window's foot.
+    $script:PickOpen = $true
+    $ui.BtnSelection.Tag = 'open'
+    $ui.PickOverlay.Visibility = 'Visible'
+    $ui.PickOverlay.UpdateLayout()
+    $anchor = $ui.BtnSelection.TranslatePoint((New-Object Windows.Point(0, 0)), $ui.PickOverlay)
+    $left = [Math]::Max([double]8, $anchor.X + $ui.BtnSelection.ActualWidth - $ui.PickMenu.Width)
+    $top = $anchor.Y + $ui.BtnSelection.ActualHeight + 6
+    $ui.PickScroll.MaxHeight = [Math]::Max([double]150, $ui.PickOverlay.ActualHeight - $top - 24)
+    $ui.PickMenu.Margin = New-Object Windows.Thickness($left, $top, 0, 0)
+    # The keyboard starts on the line that is in use, or on the first.
+    $rows = @(@(Find-Visuals $ui.PickBuiltIn ([Windows.Controls.Button])) + @(Find-Visuals $ui.PickSaved ([Windows.Controls.Button])) | Where-Object { $_.Tag -eq 'pick' })
+    $start = @($rows | Where-Object { $_.DataContext.IsChosen }) | Select-Object -First 1
+    if (-not $start -and $rows.Count -gt 0) { $start = $rows[0] }
+    if ($start) { [void]$start.Focus() }
+    Start-Motion $ui.PickMenu ([Windows.UIElement]::OpacityProperty) 1 140 -From 0
+    Start-Motion $ui.PickMenu.RenderTransform.Children[1] ([Windows.Media.TranslateTransform]::YProperty) 0 200 -From -6 -Ease 'quint'
+}
+
+function Hide-PickMenu {
+    if (-not $script:PickOpen) { return }
+    $script:PickOpen = $false
+    $script:Ui.BtnSelection.Tag = ''
+    $script:Ui.PickOverlay.Visibility = 'Collapsed'
+}
+
+# A line of the list was pressed: 'recommended', 'everything' or 'saved:' and a name.
+function Invoke-Pick {
+    param([string]$Id)
+    Hide-PickMenu
+    if ($Id -like 'saved:*') { Set-Choice 'saved' $Id.Substring(6) } else { Set-Choice $Id }
+}
+
+# ---- Saving, changing and opening
+
+# What there is to save: the changes ticked now, and those that are wanted and already
+# in place on this PC.
+function Get-SaveCounts {
+    $inPlace = @($script:Catalog | Where-Object {
+        $script:Wanted[$_.Id] -and $script:State[$_.Id].State -ne 'todo' -and (Test-ItemRelevant $_.Id) }).Count
+    return @{ Ticked = @(Get-SelectedIds).Count; InPlace = $inPlace }
+}
+
+# The sheet, made ready for a question about a selection.
+function Open-SelectionSheet {
+    param([hashtable]$Action)
+    $script:Mode = 'confirm'
+    $script:ConfirmAction = $Action
+    Reset-ConfirmSheet
+    Set-NavEnabled $false
+}
+
+# Asks for a name to save what is wanted under.
+function Show-SelectionSave {
+    if ($script:Mode -ne 'browse') { return }
+    $counts = Get-SaveCounts
+    if (($counts.Ticked + $counts.InPlace) -eq 0) { return }
+    Open-SelectionSheet @{ Kind = 'select-save' }
+    $ui = $script:Ui
+    $ui.ConfirmTitle.Text = T 'select.save.title'
+    if ($counts.InPlace -eq 0) { $ui.ConfirmSub.Text = TN 'select.save.sub' $counts.Ticked }
+    elseif ($counts.Ticked -eq 0) { $ui.ConfirmSub.Text = TN 'select.save.sub.done' $counts.InPlace }
+    else { $ui.ConfirmSub.Text = T 'select.save.sub.both' ($counts.Ticked + $counts.InPlace), $counts.Ticked, $counts.InPlace }
+    $ui.ConfirmCard.Visibility = 'Collapsed'
+    $ui.ConfirmField.Tag = T 'select.name.hint'
+    $name = ''
+    if ($script:Choice.Kind -eq 'saved') { $name = [string]$script:Choice.Name }
+    $ui.ConfirmField.Text = $name
+    $ui.ConfirmField.Visibility = 'Visible'
+    $ui.ConfirmSwitchTitle.Text = T 'select.save.file'
+    $ui.ConfirmSwitchNote.Text = T 'select.save.file.note'
+    $ui.ConfirmSwitch.IsChecked = $false
+    $ui.ConfirmSwitchCard.Visibility = 'Visible'
+    $ui.BtnConfirmCancel.Content = T 'btn.cancel'
+    $ui.BtnConfirmGo.Content = T 'btn.save'
+    Update-SelectionName
+    Open-ConfirmSheet
+    [void]$ui.ConfirmField.Focus()
+    $ui.ConfirmField.SelectAll()
+}
+
+# Lets a saved selection be renamed, written to a file or deleted.
+function Show-SelectionEdit {
+    param([string]$Name)
+    if ($script:Mode -ne 'browse') { return }
+    $entry = @(Get-SavedSelections | Where-Object { $_.Name -eq $Name }) | Select-Object -First 1
+    if (-not $entry) { return }
+    Open-SelectionSheet @{ Kind = 'select-edit'; Name = [string]$entry.Name; Sure = $false }
+    $ui = $script:Ui
+    $ui.ConfirmTitle.Text = T 'select.edit.title'
+    $ui.ConfirmSub.Text = T 'select.edit.sub'
+    $ui.ConfirmCard.Visibility = 'Collapsed'
+    $ui.ConfirmField.Tag = T 'select.name.hint'
+    $ui.ConfirmField.Text = [string]$entry.Name
+    $ui.ConfirmField.Visibility = 'Visible'
+    $ui.BtnConfirmAside.Content = T 'select.edit.delete'
+    $ui.BtnConfirmAside.Visibility = 'Visible'
+    $ui.BtnConfirmCancel.Content = T 'btn.cancel'
+    $ui.BtnConfirmMore.Content = T 'select.edit.file'
+    $ui.BtnConfirmMore.Visibility = 'Visible'
+    $ui.BtnConfirmGo.Content = T 'btn.save'
+    Update-SelectionName
+    Open-ConfirmSheet
+    [void]$ui.ConfirmField.Focus()
+    $ui.ConfirmField.SelectAll()
+}
+
+# Looks at the name being typed. The button waits for one that can be used, and the
+# small print says so when it would take the place of a list that is already there.
+function Update-SelectionName {
+    $action = $script:ConfirmAction
+    if (-not $action -or $action.Kind -notin 'select-save', 'select-edit') { return }
+    $ui = $script:Ui
+    $name = ConvertTo-DebloaterSelectionName $ui.ConfirmField.Text
+    $fine = ''
+    $usable = [bool]$name
+    if ($name -and @((T 'select.recommended'), (T 'select.everything'), (T 'select.custom')) -contains $name) {
+        $fine = T 'select.name.taken'
+        $usable = $false
+    } elseif (@(Get-SavedSelections | Where-Object { $_.Name -eq $name }).Count -gt 0) {
+        if ($action.Kind -eq 'select-save') { $fine = T 'select.name.replace' $name }
+        elseif ($name -ne $action.Name) { $fine = T 'select.name.used'; $usable = $false }
+    }
+    Set-ConfirmFine $fine
+    $ui.BtnConfirmGo.IsEnabled = $usable
+}
+
+# Keeps a list under a name, in the place of one of the same name if there is one.
+function Save-SelectionAs {
+    param([string]$Name, $Ids, [string]$Saved = '')
+    if (-not $Saved) { $Saved = (Get-Date).ToString('yyyy-MM-dd') }
+    $entry = [pscustomobject]@{ Name = $Name; Saved = $Saved; Ids = @($Ids) }
+    $list = @()
+    $placed = $false
+    foreach ($existing in @(Get-SavedSelections)) {
+        if ($existing.Name -eq $Name) { $list += $entry; $placed = $true } else { $list += $existing }
+    }
+    if (-not $placed) { $list += $entry }
+    Set-SavedSelections $list
+}
+
+# A name as part of a file name.
+function Get-SelectionFileName {
+    param([string]$Name)
+    $safe = ($Name -replace '[\\/:*?"<>|]', '-').Trim(' ', '.')
+    if (-not $safe) { $safe = 'selection' }
+    return ($safe + '.debloat.json')
+}
+
+# Writes a saved selection to a file for another PC, asking where unless told.
+function Save-SelectionFile {
+    param([string]$Name, [string]$Path = '')
+    $entry = @(Get-SavedSelections | Where-Object { $_.Name -eq $Name }) | Select-Object -First 1
+    if (-not $entry) { return $false }
+    if (-not $Path) {
+        $dialog = New-Object Microsoft.Win32.SaveFileDialog
+        $dialog.Title = T 'select.file.save.title'
+        $dialog.Filter = (T 'select.file.filter') + ' (*.json)|*.json'
+        $dialog.DefaultExt = '.json'
+        $dialog.AddExtension = $true
+        $dialog.OverwritePrompt = $true
+        $dialog.FileName = Get-SelectionFileName ([string]$entry.Name)
+        if (-not $dialog.ShowDialog($script:Window)) { return $false }
+        $Path = $dialog.FileName
+    }
+    try {
+        Export-DebloaterSelection -Name ([string]$entry.Name) -Ids $entry.Ids -Path $Path
+    } catch {
+        Show-SelectionProblem (T 'select.fail.write')
+        return $false
+    }
+    return $true
+}
+
+# Reads a selection file, asking which unless told, and shows what it comes to here.
+function Open-SelectionFile {
+    param([string]$Path = '')
+    if ($script:Mode -ne 'browse') { return }
+    if (-not $Path) {
+        $dialog = New-Object Microsoft.Win32.OpenFileDialog
+        $dialog.Title = T 'select.file.open.title'
+        $dialog.Filter = (T 'select.file.filter') + ' (*.json)|*.json'
+        if (-not $dialog.ShowDialog($script:Window)) { return }
+        $Path = $dialog.FileName
+    }
+    $file = $null
+    try {
+        $file = Import-DebloaterSelection $Path
+    } catch {
+        $key = [string]$_.Exception.Message
+        if ($key -notlike 'select.fail.*') { $key = 'select.fail.format' }
+        Show-SelectionProblem (T $key)
+        return
+    }
+    Show-SelectionUse $file
+}
+
+# The sheet that says what a selection file comes to on this PC, before it is used:
+# what will be ticked, and what is left out because it is not here or already done.
+function Show-SelectionUse {
+    param($File)
+    if ($script:Mode -ne 'browse') { return }
+    $fit = Get-DebloaterSelectionFit $File.Ids $script:Catalog $script:State
+    Open-SelectionSheet @{ Kind = 'select-use'; File = $File }
+    $ui = $script:Ui
+    $ui.ConfirmEyebrow.Text = Format-Caps (T 'select.use.eyebrow' $File.Name)
+    $ui.ConfirmEyebrow.Visibility = 'Visible'
+    $ui.ConfirmTitle.Text = T 'select.use.title' $File.Name
+    $sub = TN 'select.use.lists' @($File.Ids).Count
+    $when = [datetime]::MinValue
+    if ($File.Version -and [datetime]::TryParseExact([string]$File.Saved, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$when)) {
+        $sub = (T 'select.use.saved' ($when.ToString('d MMMM yyyy', (Get-UiCulture))), $File.Version) + ' ' + $sub
+    }
+    $ui.ConfirmSub.Text = $sub
+
+    $lines = @()
+    $ticked = @($fit.Ticked).Count
+    if ($ticked -eq 0) { $lines += , @((T 'select.use.none'), (T 'select.use.none.note'), 0xE738) }
+    elseif ($ticked -eq 1) { $lines += , @((T 'select.use.ticked.one'), (T 'select.use.ticked.note.one'), 0xE73E) }
+    else { $lines += , @((T 'select.use.ticked' $ticked), (T 'select.use.ticked.note'), 0xE73E) }
+    $left = @($fit.Done).Count + @($fit.Missing).Count + @($fit.Unknown).Count
+    if ($left -gt 0 -and $ticked -gt 0) {
+        $why = @()
+        if (@($fit.Missing).Count -gt 0) { $why += TN 'select.use.left.missing' @($fit.Missing).Count }
+        if (@($fit.Done).Count -gt 0) { $why += TN 'select.use.left.done' @($fit.Done).Count }
+        if (@($fit.Unknown).Count -gt 0) { $why += TN 'select.use.left.unknown' @($fit.Unknown).Count }
+        $lines += , @((TN 'select.use.left' $left), (($why -join ', ') + '.'), 0xE738)
+    }
+    $rows = New-Collection
+    foreach ($entry in $lines) {
+        $row = New-Object Debloater.Ui.SummaryVm
+        $row.Glyph = Glyph $entry[2]
+        $row.Text = $entry[0]
+        $row.Note = $entry[1]
+        $rows.Add($row)
+    }
+    $ui.ConfirmRows.ItemsSource = $rows
+    $fine = T 'select.use.fine'
+    if (@(Get-SavedSelections | Where-Object { $_.Name -eq $File.Name }).Count -gt 0) { $fine += ' ' + (T 'select.use.fine.replace') }
+    Set-ConfirmFine $fine
+    $ui.BtnConfirmCancel.Content = T 'btn.cancel'
+    $ui.BtnConfirmGo.Content = T 'select.use.go'
+    Open-ConfirmSheet
+}
+
+# Something about a selection file went wrong: the sheet says what, with one button.
+function Show-SelectionProblem {
+    param([string]$Message)
+    Open-SelectionSheet @{ Kind = 'select-problem' }
+    $ui = $script:Ui
+    $ui.ConfirmCard.Visibility = 'Collapsed'
+    $ui.ConfirmTitle.Text = T 'select.fail.title'
+    $ui.ConfirmSub.Text = $Message
+    Set-ConfirmFine ''
+    $ui.BtnConfirmCancel.Content = T 'btn.close'
+    $ui.BtnConfirmGo.Visibility = 'Collapsed'
+    Open-ConfirmSheet
+    [void]$ui.BtnConfirmCancel.Focus()
+}
+
+# The confirming button of a sheet about a selection.
+function Invoke-SelectionGo {
+    $action = $script:ConfirmAction
+    $ui = $script:Ui
+    if ($action.Kind -eq 'select-save') {
+        $name = ConvertTo-DebloaterSelectionName $ui.ConfirmField.Text
+        if (-not $name -or -not $ui.BtnConfirmGo.IsEnabled) { return }
+        $toFile = [bool]$ui.ConfirmSwitch.IsChecked
+        Save-SelectionAs $name @($script:Wanted.Keys | Sort-Object)
+        $script:Choice = @{ Kind = 'saved'; Name = $name }
+        Hide-Confirm
+        Update-Bars
+        Save-UiSettings
+        if ($toFile -and -not $script:SelfTestDir) { [void](Save-SelectionFile $name) }
+    } elseif ($action.Kind -eq 'select-edit') {
+        $name = ConvertTo-DebloaterSelectionName $ui.ConfirmField.Text
+        if (-not $name -or -not $ui.BtnConfirmGo.IsEnabled) { return }
+        if ($name -cne $action.Name) {
+            $list = @()
+            foreach ($entry in @(Get-SavedSelections)) {
+                if ($entry.Name -eq $action.Name) { $list += [pscustomobject]@{ Name = $name; Saved = [string]$entry.Saved; Ids = @($entry.Ids) } }
+                else { $list += $entry }
+            }
+            Set-SavedSelections $list
+            if ($script:Choice.Kind -eq 'saved' -and $script:Choice.Name -eq $action.Name) { $script:Choice = @{ Kind = 'saved'; Name = $name } }
+        }
+        Hide-Confirm
+        Update-Bars
+        Save-UiSettings
+    } elseif ($action.Kind -eq 'select-use') {
+        $file = $action.File
+        Hide-Confirm
+        # It is kept under its name, so it is in the list from now on. A name the tool
+        # uses for one of its own lists gets a number.
+        $name = [string]$file.Name
+        if (@((T 'select.recommended'), (T 'select.everything'), (T 'select.custom')) -contains $name) { $name = ConvertTo-DebloaterSelectionName ($name + ' 2') }
+        Save-SelectionAs $name $file.Ids ([string]$file.Saved)
+        Set-Choice 'saved' $name
+    } else {
+        Hide-Confirm
+    }
+}
+
+# Delete, on the sheet of a saved selection. It asks once more on the button itself.
+function Invoke-SelectionDelete {
+    $action = $script:ConfirmAction
+    if (-not $action -or $action.Kind -ne 'select-edit') { return }
+    if (-not $action.Sure) {
+        $action.Sure = $true
+        $script:Ui.BtnConfirmAside.Content = T 'select.edit.delete.sure'
+        return
+    }
+    Set-SavedSelections @(Get-SavedSelections | Where-Object { $_.Name -ne $action.Name })
+    Hide-Confirm
+    # What was ticked stays ticked; it has just lost its name.
+    if ($script:Choice.Kind -eq 'saved' -and $script:Choice.Name -eq $action.Name) {
+        $script:Choice = @{ Kind = 'custom'; Name = '' }
+        Update-Choice
+    }
+    Update-Bars
+    Save-UiSettings
+}
+
+# Save to a file, on the sheet of a saved selection.
+function Invoke-SelectionEditFile {
+    $action = $script:ConfirmAction
+    if (-not $action -or $action.Kind -ne 'select-edit') { return }
+    $name = [string]$action.Name
+    Hide-Confirm
+    [void](Save-SelectionFile $name)
 }
 
 # ================================================================ Updates
@@ -1973,7 +2487,8 @@ function Set-ConfirmFine {
     }
 }
 
-# The sheet goes back to its plain form: no label above, no bar, two buttons.
+# The sheet goes back to its plain form: no label above, no bar, nothing to type or
+# switch, two buttons.
 function Reset-ConfirmSheet {
     $ui = $script:Ui
     $ui.ConfirmFine.Visibility = 'Visible'
@@ -1984,6 +2499,10 @@ function Reset-ConfirmSheet {
     $ui.ConfirmCard.Visibility = 'Visible'
     $ui.ConfirmButtons.Visibility = 'Visible'
     $ui.BtnConfirmGo.Visibility = 'Visible'
+    $ui.BtnConfirmGo.IsEnabled = $true
+    $ui.ConfirmField.Visibility = 'Collapsed'
+    $ui.ConfirmSwitchCard.Visibility = 'Collapsed'
+    $ui.BtnConfirmAside.Visibility = 'Collapsed'
 }
 
 # The same sheet, offering the newer version. A copy the installer put in place can
@@ -2178,9 +2697,13 @@ function Invoke-KeyDown {
         elseif ($script:Mode -eq 'confirm') { Invoke-ConfirmGo }
         elseif ($script:Mode -eq 'result') { Exit-ToBrowse }
         $e.Handled = $true
+    } elseif ($e.Key -eq 'Return' -and $script:Mode -eq 'confirm' -and $typing) {
+        # Enter on the line where a name is typed is the sheet's own button.
+        Invoke-ConfirmGo
+        $e.Handled = $true
     } elseif ($control -and $e.Key -eq 'R' -and $script:Mode -eq 'browse') {
+        Hide-PickMenu
         Reset-ToRecommended
-        if ($script:CurrentPage -eq 'home') { Build-Home }
         $e.Handled = $true
     } elseif ($control -and $e.Key -eq 'A' -and $script:Mode -eq 'browse' -and -not $typing -and $onArea) {
         Set-ItemsSelected @(Get-TodoItems $script:CurrentPage) $true
@@ -2190,7 +2713,8 @@ function Invoke-KeyDown {
         $script:Ui.SearchBox.SelectAll()
         $e.Handled = $true
     } elseif ($e.Key -eq 'Escape') {
-        if ($script:Mode -eq 'confirm') { Hide-Confirm; $e.Handled = $true }
+        if ($script:PickOpen) { Hide-PickMenu; $e.Handled = $true }
+        elseif ($script:Mode -eq 'confirm') { Hide-Confirm; $e.Handled = $true }
         elseif ($typing -and $script:Ui.SearchBox.Text) { $script:Ui.SearchBox.Text = ''; $e.Handled = $true }
         elseif ($script:Mode -eq 'browse' -and $script:CurrentPage -ne 'home') { Show-Page 'home'; $e.Handled = $true }
     }
@@ -2451,6 +2975,120 @@ function Invoke-TestApply {
     foreach ($step in $script:Steps) { if ($step.Status -eq 'ok') { $OkIds[$step.Id] = $true } }
 }
 
+# A line of the open list of selections: 'recommended', 'everything', or 'saved:' and
+# a name. With -Edit, the button at its end instead.
+function Get-TestPick {
+    param([string]$Id, [switch]$Edit)
+    $ui = $script:Ui
+    $tag = 'pick'
+    if ($Edit) { $tag = 'edit' }
+    $found = @(@(Find-Visuals $ui.PickBuiltIn ([Windows.Controls.Button])) + @(Find-Visuals $ui.PickSaved ([Windows.Controls.Button])) |
+        Where-Object { $_.Tag -eq $tag -and $_.DataContext -and $_.DataContext.Id -eq $Id })
+    if (-not $script:PickOpen -or $found.Count -ne 1) { throw ('The list of selections has no line for ' + $Id + '.') }
+    return $found[0]
+}
+
+# Everything about selections, the way a person would do it: choosing from the list,
+# ticking by hand, saving under a name, using a file from another PC, renaming and
+# deleting. It ends where it began, with the recommended list in use.
+function Invoke-TestSelections {
+    param([string]$Dir, [string[]]$Common, [int]$Recommended, [int]$Everything)
+    $ui = $script:Ui
+    # Whatever was ticked on the way here, the list brings the recommended ones back.
+    Invoke-TestClick $ui.BtnSelection
+    if (-not $script:PickOpen -or $ui.PickOverlay.Visibility -ne 'Visible') { throw 'The box did not open the list of selections.' }
+    if ($ui.PickSavedBlock.Visibility -eq 'Visible') { throw 'The list shows saved selections where there are none.' }
+    Invoke-TestClick (Get-TestPick 'recommended')
+    if ([string]$ui.BtnSelection.Content -ne (T 'select.recommended') -or @(Get-SelectedIds).Count -ne $Recommended) { throw 'Choosing the recommended list did not tick the recommended changes.' }
+    Invoke-TestClick $ui.BtnSelection
+    Test-VisualStates (Get-TestPick 'everything') ($Common + 'Disabled' + 'Normal')
+    Test-VisualStates $ui.BtnPickSave ($Common + 'Disabled' + 'Normal')
+    Invoke-TestClick (Get-TestPick 'everything')
+    if ($script:PickOpen) { throw 'Choosing from the list did not close it.' }
+    if (@(Get-SelectedIds).Count -ne $Everything) { throw 'Choosing everything did not tick everything.' }
+    if ([string]$ui.BtnSelection.Content -ne (T 'select.everything')) { throw 'The box does not name the selection that was chosen.' }
+    Save-DebloaterScreenshot (Join-Path $Dir 'home-all.png')
+
+    # Ticked by hand it is the person's own; ticked back, it has its name again.
+    $one = @(Get-TodoItems)[0]
+    Set-ItemsSelected @($one) $false
+    if ($script:Choice.Kind -ne 'custom' -or [string]$ui.BtnSelection.Content -ne (T 'select.custom')) { throw 'Unticking one thing by hand did not make the selection the person''s own.' }
+    Set-ItemsSelected @($one) $true
+    if ($script:Choice.Kind -ne 'everything') { throw 'Ticking it again did not give the selection its name back.' }
+
+    # Saved under a name: it is in use, and in the list from then on.
+    Invoke-TestClick $ui.BtnSelection
+    Invoke-TestClick $ui.BtnPickSave
+    if ($script:Mode -ne 'confirm' -or $ui.ConfirmField.Visibility -ne 'Visible') { throw 'Saving a selection did not ask for a name.' }
+    if ($ui.BtnConfirmGo.IsEnabled) { throw 'A selection could be saved without a name.' }
+    $ui.ConfirmField.Text = T 'select.recommended'
+    Invoke-UiIdle
+    if ($ui.BtnConfirmGo.IsEnabled) { throw 'A selection could be saved under a name the tool uses itself.' }
+    $ui.ConfirmField.Text = 'Gaming PC'
+    Invoke-UiIdle
+    if (-not $ui.BtnConfirmGo.IsEnabled) { throw 'A name that can be used was refused.' }
+    Test-VisualStates $ui.ConfirmSwitch ($Common + 'Checked' + 'Unchecked')
+    Save-DebloaterScreenshot (Join-Path $Dir 'select-save.png')
+    Invoke-TestClick $ui.BtnConfirmGo
+    if ($script:Mode -ne 'browse' -or $script:Choice.Kind -ne 'saved' -or [string]$ui.BtnSelection.Content -ne 'Gaming PC') { throw 'Saving did not take the selection into use under its name.' }
+    if (@(Get-SelectedIds).Count -ne $Everything) { throw 'Saving a selection changed what is ticked.' }
+
+    # A file from another PC: shown first, with what fits here, then taken into use.
+    $file = Join-Path $Dir 'laptop.debloat.json'
+    $some = @(Get-TodoItems | Select-Object -First 5 | ForEach-Object { $_.Id })
+    Export-DebloaterSelection -Name "Mum's laptop" -Ids ($some + 'not.in-this-version') -Path $file
+    Open-SelectionFile $file
+    if ($script:Mode -ne 'confirm' -or $ui.ConfirmRows.Items.Count -ne 2) { throw 'A selection file was not laid out before it was used.' }
+    Save-DebloaterScreenshot (Join-Path $Dir 'select-use.png')
+    Invoke-TestClick $ui.BtnConfirmCancel
+    if ($script:Choice.Name -ne 'Gaming PC' -or @(Get-SavedSelections).Count -ne 1) { throw 'Cancel did not leave things as they were.' }
+    Open-SelectionFile $file
+    Invoke-TestClick $ui.BtnConfirmGo
+    if ($script:Mode -ne 'browse' -or $script:Choice.Name -ne "Mum's laptop") { throw 'A selection file was not taken into use.' }
+    if (@(Get-SelectedIds).Count -ne $some.Count) { throw 'Using a selection file did not tick what it lists, and only that.' }
+    [IO.File]::WriteAllText($file, '{ "kind": "something else" }')
+    Open-SelectionFile $file
+    if ($script:Mode -ne 'confirm' -or $ui.BtnConfirmGo.Visibility -eq 'Visible') { throw 'A file that is no selection was not refused.' }
+    Save-DebloaterScreenshot (Join-Path $Dir 'select-problem.png')
+    Invoke-TestClick $ui.BtnConfirmCancel
+    if ($script:Mode -ne 'browse' -or $script:Choice.Name -ne "Mum's laptop") { throw 'A refused file changed the selection.' }
+
+    # The list with both in it, and the sheet of a saved one: a new name, then gone.
+    Invoke-TestClick $ui.BtnSelection
+    if ($ui.PickSaved.Items.Count -ne 2) { throw 'The list does not show the two saved selections.' }
+    Test-VisualStates (Get-TestPick "saved:Mum's laptop" -Edit) $Common
+    Save-DebloaterScreenshot (Join-Path $Dir 'select-list.png')
+    Invoke-TestClick (Get-TestPick "saved:Mum's laptop" -Edit)
+    if ($script:PickOpen -or $script:Mode -ne 'confirm' -or $ui.BtnConfirmAside.Visibility -ne 'Visible') { throw 'The button of a saved selection did not open its sheet.' }
+    Test-VisualStates $ui.BtnConfirmAside $Common
+    Save-DebloaterScreenshot (Join-Path $Dir 'select-edit.png')
+    $ui.ConfirmField.Text = 'Gaming PC'
+    Invoke-UiIdle
+    if ($ui.BtnConfirmGo.IsEnabled) { throw 'Two saved selections could be given the same name.' }
+    $ui.ConfirmField.Text = 'Laptop'
+    Invoke-UiIdle
+    Invoke-TestClick $ui.BtnConfirmGo
+    if ($script:Mode -ne 'browse' -or $script:Choice.Name -ne 'Laptop' -or [string]$ui.BtnSelection.Content -ne 'Laptop') { throw 'Renaming the selection in use did not rename it on the overview.' }
+    Invoke-TestClick $ui.BtnSelection
+    Invoke-TestClick (Get-TestPick 'saved:Laptop' -Edit)
+    Invoke-TestClick $ui.BtnConfirmAside
+    if ($script:Mode -ne 'confirm' -or @(Get-SavedSelections).Count -ne 2) { throw 'Delete did not ask once more.' }
+    Invoke-TestClick $ui.BtnConfirmAside
+    if ($script:Mode -ne 'browse' -or @(Get-SavedSelections).Count -ne 1) { throw 'Delete did not delete the selection.' }
+    if ($script:Choice.Kind -ne 'custom' -or @(Get-SelectedIds).Count -ne $some.Count) { throw 'Deleting the selection in use changed what is ticked.' }
+
+    # Escape and a press beside the list both close it; then back to the start.
+    Invoke-TestClick $ui.BtnSelection
+    Hide-PickMenu
+    if ($ui.PickOverlay.Visibility -eq 'Visible') { throw 'The list of selections did not close.' }
+    Invoke-TestClick $ui.BtnSelection
+    Invoke-TestClick (Get-TestPick 'saved:Gaming PC')
+    if (@(Get-SelectedIds).Count -ne $Everything) { throw 'Choosing a saved selection did not tick what it holds.' }
+    Invoke-TestClick $ui.BtnSelection
+    Invoke-TestClick (Get-TestPick 'recommended')
+    if (@(Get-SelectedIds).Count -ne $Recommended -or @(Get-SelectedIds | Where-Object { -not $script:ById[$_].Recommended }).Count -ne 0) { throw 'Choosing the recommended list did not go back to the recommended changes.' }
+}
+
 # Walks through the whole window without changing anything and saves a screenshot of
 # each stage. It raises the same click and selection events a person would, so the
 # real handlers run. Used by test\Run-Tests.ps1 and to make the pictures in the README.
@@ -2479,7 +3117,7 @@ function Invoke-DebloaterSelfTest {
         Test-VisualStates $ui.BtnMin $common
         Test-VisualStates $ui.BtnClose $common
         foreach ($button in @(Find-Visuals $ui.HomeCards ([Windows.Controls.Button]))) { Test-VisualStates $button $common }
-        if ($ui.OptionalSwitch.Visibility -eq 'Visible') { Test-VisualStates $ui.OptionalSwitch ($common + 'Checked' + 'Unchecked') }
+        if ($ui.SelectionRow.Visibility -eq 'Visible') { Test-VisualStates $ui.BtnSelection ($common + 'Disabled' + 'Normal') }
 
         # Every area, opened from its row.
         foreach ($page in 'apps', 'ads', 'edge', 'look', 'onedrive') {
@@ -2550,16 +3188,11 @@ function Invoke-DebloaterSelfTest {
         if ($script:CurrentPage -ne $card.DataContext.Id) { throw 'A row did not open its area.' }
         Select-TestNav 'home'
 
-        # The switch adds every optional item, and takes them out again.
+        # The box on the overview names the selection in use, and its list changes it.
         $everything = @(Get-TodoItems).Count
-        if ($ui.OptionalSwitch.Visibility -eq 'Visible') {
-            $ui.OptionalSwitch.IsChecked = $true
-            Invoke-TestClick $ui.OptionalSwitch
-            if (@(Get-SelectedIds).Count -ne $everything) { throw 'Switching optional items on did not tick everything.' }
-            Save-DebloaterScreenshot (Join-Path $dir 'home-all.png')
-            $ui.OptionalSwitch.IsChecked = $false
-            Invoke-TestClick $ui.OptionalSwitch
-            if (@(Get-SelectedIds | Where-Object { -not $script:ById[$_].Recommended }).Count -ne 0) { throw 'Switching optional items off left some ticked.' }
+        if ($ui.SelectionRow.Visibility -eq 'Visible') {
+            Invoke-TestSelections $dir $common $recommended $everything
+            $report.selectionsShown = $true
         }
 
         # A newer version: the pill in the top bar, the sheet it opens, and the sheet
@@ -2612,14 +3245,15 @@ function Invoke-DebloaterSelfTest {
                 $report.finishedHome = $true
                 Save-DebloaterScreenshot (Join-Path $dir 'home-done.png')
 
-                # Ticking something optional brings the button back.
-                if ($ui.OptionalSwitch.Visibility -eq 'Visible') {
-                    $ui.OptionalSwitch.IsChecked = $true
-                    Invoke-TestClick $ui.OptionalSwitch
-                    if ($ui.BtnDebloat.Visibility -ne 'Visible') { throw 'Ticking optional items did not bring the Debloat button back.' }
-                    $ui.OptionalSwitch.IsChecked = $false
-                    Invoke-TestClick $ui.OptionalSwitch
-                    if ($ui.HomeMedal.Visibility -ne 'Visible') { throw 'Unticking the optional items did not bring the medal back.' }
+                # Choosing everything brings the button back, and the recommended list
+                # the medal: there is nothing recommended left to do.
+                if ($ui.SelectionRow.Visibility -eq 'Visible') {
+                    Invoke-TestClick $ui.BtnSelection
+                    Invoke-TestClick (Get-TestPick 'everything')
+                    if ($ui.BtnDebloat.Visibility -ne 'Visible') { throw 'Choosing everything did not bring the Debloat button back.' }
+                    Invoke-TestClick $ui.BtnSelection
+                    Invoke-TestClick (Get-TestPick 'recommended')
+                    if ($ui.HomeMedal.Visibility -ne 'Visible') { throw 'Choosing the recommended list again did not bring the medal back.' }
                 }
 
                 # Revert: asks first, plays the same screen, then lists things to do again.
@@ -2715,6 +3349,13 @@ function Show-DebloaterWindow {
     $script:State = @{}
     foreach ($item in $script:Catalog) { $script:State[$item.Id] = [pscustomobject]@{ State = 'absent' } }
     $script:Selected = @{}
+    $script:Wanted = @{}
+    $script:Choice = @{ Kind = 'recommended'; Name = '' }
+    $script:ChoiceReady = $false
+    $script:ChoiceDirty = $false
+    $script:StoredChoice = $null
+    $script:SavedSelections = $null
+    $script:PickOpen = $false
     $script:PageVms = @{}
     $script:Steps = New-Collection
     $script:StepById = @{}
@@ -2759,7 +3400,9 @@ function Show-DebloaterWindow {
         'Root', 'TopBar', 'BrandName', 'ModeRow', 'ModeTag', 'BtnHistory', 'BtnSettings',
         'BtnMin', 'BtnMax', 'MaxGlyph', 'BtnClose', 'LoadingText', 'LoadingHalo', 'HistoryScroll',
         'HomeHead', 'HomeEyebrow', 'HomeTitle', 'HomeSub', 'HomeBanner', 'HomeBannerTitle', 'HomeBannerSub', 'BtnHomeUndo',
-        'HomeCards', 'HomePanelLabel', 'HomeCount', 'HomeReady', 'HomeReadySub', 'BtnDebloat', 'HomeMedal', 'OptionalSwitch',
+        'HomeCards', 'HomePanelLabel', 'HomeCount', 'HomeReady', 'HomeReadySub', 'BtnDebloat', 'HomeMedal',
+        'SelectionRow', 'SelectionLabel', 'BtnSelection', 'PickOverlay', 'PickMenu', 'PickScroll', 'PickBuiltIn', 'PickSavedBlock',
+        'PickSavedLabel', 'PickSaved', 'BtnPickSave', 'BtnPickOpen',
         'BtnBack', 'ListOrb', 'ListTitle', 'ListIntro', 'SearchBox', 'BtnSelectAll', 'BtnSelectNone', 'ListScroll', 'ListGroups',
         'ListEmpty', 'ListEmptyBadge', 'ListEmptyGlyph', 'ListEmptyTitle', 'ListEmptyText', 'DoneLabel', 'DoneCard', 'DoneItems',
         'BtnDebloatSmall', 'BarTitle', 'BarSub',
@@ -2771,7 +3414,8 @@ function Show-DebloaterWindow {
         'SettingsAboutLabel', 'AboutName', 'AboutVersion', 'AboutCopyright', 'AboutPrivacy', 'LinkRepo', 'LinkChanges', 'LinkData',
         'LinkLicence', 'LinkSite', 'LinkSupport',
         'ConfirmOverlay', 'ConfirmSheet', 'ConfirmEyebrow', 'ConfirmTitle', 'ConfirmSub', 'ConfirmCard', 'ConfirmRows', 'ConfirmMeter', 'ConfirmFine',
-        'ConfirmButtons', 'BtnConfirmCancel', 'BtnConfirmMore', 'BtnConfirmGo', 'BtnUpdate', 'UpdateSwitch', 'LinkUpdate', 'UpdateStatus'
+        'ConfirmButtons', 'BtnConfirmCancel', 'BtnConfirmMore', 'BtnConfirmGo', 'BtnUpdate', 'UpdateSwitch', 'LinkUpdate', 'UpdateStatus',
+        'ConfirmField', 'ConfirmSwitchCard', 'ConfirmSwitch', 'ConfirmSwitchTitle', 'ConfirmSwitchNote', 'BtnConfirmAside'
     ) + $script:ViewNames
     foreach ($name in $names) {
         $script:Ui[$name] = $script:Window.FindName($name)
@@ -2806,6 +3450,7 @@ function Show-DebloaterWindow {
     $saved = Get-DebloaterSettings
     $script:UpdatesOn = [bool]$saved.updates
     $script:UpdateChecked = [string]$saved.updateChecked
+    $script:StoredChoice = $saved.selection
     # A newer version found on an earlier day is offered again without asking anew.
     if (Test-UpdateAllowed) { $script:Update = Get-DebloaterKnownUpdate }
     if (-not $SelfTestDir) {
@@ -2856,7 +3501,10 @@ function Show-DebloaterWindow {
     $script:SelectionHandler = [EventHandler] {
         param($s, $e)
         Invoke-Guarded {
-            if ($s.IsSelected) { $script:Selected[$s.Id] = $true } else { $script:Selected.Remove($s.Id) }
+            if ($s.IsSelected) { $script:Selected[$s.Id] = $true; $script:Wanted[$s.Id] = $true }
+            else { $script:Selected.Remove($s.Id); $script:Wanted.Remove($s.Id) }
+            Update-Choice
+            $script:ChoiceDirty = $true
             Update-Bars
         }
     }
@@ -2867,7 +3515,13 @@ function Show-DebloaterWindow {
     $ui.BtnDebloatSmall.Add_Click({ Invoke-Guarded { Show-Confirm } })
     $ui.BtnConfirmCancel.Add_Click({ Invoke-Guarded { Hide-Confirm } })
     $ui.BtnConfirmGo.Add_Click({ Invoke-Guarded { Invoke-ConfirmGo } })
-    $ui.BtnConfirmMore.Add_Click({ Invoke-Guarded { Open-UpdatePage } })
+    $ui.BtnConfirmMore.Add_Click({
+        Invoke-Guarded {
+            if ($script:ConfirmAction -and $script:ConfirmAction.Kind -eq 'select-edit') { Invoke-SelectionEditFile } else { Open-UpdatePage }
+        }
+    })
+    $ui.BtnConfirmAside.Add_Click({ Invoke-Guarded { Invoke-SelectionDelete } })
+    $ui.ConfirmField.Add_TextChanged({ Invoke-Guarded { Update-SelectionName } })
     $ui.BtnUpdate.Add_Click({ Invoke-Guarded { Show-UpdateSheet } })
     $ui.UpdateSwitch.Add_Click({
         Invoke-Guarded {
@@ -2893,13 +3547,15 @@ function Show-DebloaterWindow {
     $ui.BtnDone.Add_Click({ Invoke-Guarded { Exit-ToBrowse } })
     $ui.BtnOpenLog.Add_Click({ Invoke-Guarded { Open-Path $script:LastRunDir } })
 
-    $ui.OptionalSwitch.Add_Click({
-        Invoke-Guarded {
-            $optional = @(Get-TodoItems | Where-Object { -not $_.Recommended })
-            Set-ItemsSelected $optional ([bool]$script:Ui.OptionalSwitch.IsChecked)
-            Build-Home
-        }
+    # The box that names the selection in use, and the list it opens.
+    $ui.BtnSelection.Add_Click({ Invoke-Guarded { if ($script:PickOpen) { Hide-PickMenu } else { Show-PickMenu } } })
+    $ui.PickOverlay.Add_MouseLeftButtonDown({
+        param($s, $e)
+        # Anywhere but on the list itself.
+        Invoke-Guarded { if ($e.OriginalSource -eq $script:Ui.PickOverlay) { Hide-PickMenu } }
     })
+    $ui.BtnPickSave.Add_Click({ Invoke-Guarded { Hide-PickMenu; Show-SelectionSave } })
+    $ui.BtnPickOpen.Add_Click({ Invoke-Guarded { Hide-PickMenu; Open-SelectionFile } })
     $ui.BtnBack.Add_Click({ Invoke-Guarded { Show-Page 'home' } })
     $ui.BtnSelectAll.Add_Click({ Invoke-Guarded { Set-ItemsSelected @($script:PageVms.Keys | ForEach-Object { $script:ById[$_] }) $true } })
     $ui.BtnSelectNone.Add_Click({ Invoke-Guarded { Set-ItemsSelected @(Get-TodoItems $script:CurrentPage) $false } })
@@ -2925,6 +3581,18 @@ function Show-DebloaterWindow {
                 'undo'  { Show-UndoConfirm ([string]$context.Dir) }
                 'open'  { Open-Path ([string]$context.Dir) }
                 'store' { Start-Process ('ms-windows-store://pdp/?PFN=' + [string]$context.Family) }
+            }
+        }
+    })
+    $ui.PickMenu.AddHandler($click, [Windows.RoutedEventHandler] {
+        param($s, $e)
+        Invoke-Guarded {
+            $button = $e.OriginalSource
+            $context = $button.DataContext
+            if (-not $context -or -not $context.Id) { return }
+            switch ([string]$button.Tag) {
+                'pick' { Invoke-Pick ([string]$context.Id) }
+                'edit' { Hide-PickMenu; Show-SelectionEdit ([string]$context.Title) }
             }
         }
     })
@@ -2961,7 +3629,7 @@ function Show-DebloaterWindow {
     })
     $script:Window.Add_PreviewKeyDown({ param($s, $e) Invoke-Guarded { Invoke-KeyDown $e } })
     $script:Window.Add_SourceInitialized({ Set-WindowLook })
-    $script:Window.Add_SizeChanged({ Invoke-Guarded { Update-Zoom } })
+    $script:Window.Add_SizeChanged({ Invoke-Guarded { Hide-PickMenu; Update-Zoom } })
     $script:Window.Dispatcher.add_UnhandledException({
         param($s, $e)
         $e.Handled = $true
@@ -2977,7 +3645,7 @@ function Show-DebloaterWindow {
                 Stop-LoadingPulse
                 # A demo starts from a made-up PC, so this PC's real history has no place in it.
                 Update-RunRecord
-                foreach ($item in Get-TodoItems) { if ($item.Recommended) { $script:Selected[$item.Id] = $true } }
+                Initialize-Selection
                 $script:Mode = 'browse'
                 Show-Page 'home'
                 if ($script:SelfTestDir) { Invoke-DebloaterSelfTest }

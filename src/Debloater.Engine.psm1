@@ -62,7 +62,9 @@ function Get-DebloaterSettings {
     # width and height are the size the window was left at; 0 means the size it is designed for.
     # updates says whether to ask GitHub for a newer version when the window opens, and
     # updateChecked is when that was last asked, so it happens once a day at most.
-    $settings = [pscustomobject]@{ lang = ''; theme = 'dark'; width = 0; height = 0; maximized = $false; updates = $true; updateChecked = '' }
+    # selection is what was ticked when the window was last closed; nothing when it has
+    # never been closed with this version or a later one.
+    $settings = [pscustomobject]@{ lang = ''; theme = 'dark'; width = 0; height = 0; maximized = $false; updates = $true; updateChecked = ''; selection = $null }
     $file = Join-Path (Get-DebloaterDataRoot) 'settings.json'
     if (Test-Path -LiteralPath $file) {
         try {
@@ -78,6 +80,16 @@ function Get-DebloaterSettings {
             $settings.maximized = ([string](Get-OptionalProperty $saved 'maximized') -eq 'True')
             $settings.updates = ([string](Get-OptionalProperty $saved 'updates') -ne 'False')
             $settings.updateChecked = [string](Get-OptionalProperty $saved 'updateChecked')
+            $choice = Get-OptionalProperty $saved 'selection'
+            $kind = [string](Get-OptionalProperty $choice 'kind')
+            if ($kind -in 'recommended', 'everything', 'saved', 'custom') {
+                $settings.selection = [pscustomobject]@{
+                    kind = $kind
+                    name = (ConvertTo-DebloaterSelectionName ([string](Get-OptionalProperty $choice 'name')))
+                    ids = @(ConvertTo-DebloaterIdList (Get-OptionalProperty $choice 'ids'))
+                    known = @(ConvertTo-DebloaterIdList (Get-OptionalProperty $choice 'known'))
+                }
+            }
         } catch {}
     }
     return $settings
@@ -90,6 +102,156 @@ function Save-DebloaterSettings {
         [void](New-Item -ItemType Directory -Force -Path $root)
         Write-DebloaterJson $Settings (Join-Path $root 'settings.json')
     } catch {}
+}
+
+# ================================================================ Selections
+#
+# A selection is a list of item ids: what someone wants debloated. The tool has two of
+# its own, the recommended items and everything, and keeps the ones a person saved
+# under a name in selections.json, next to the settings. A selection can also travel as
+# a file of its own, to be used on another PC.
+
+# A name as it may be kept: one line, no control characters, 40 characters at most.
+function ConvertTo-DebloaterSelectionName {
+    param([string]$Name)
+    $clean = (([string]$Name -replace '[\x00-\x1F\x7F]', ' ') -replace '\s+', ' ').Trim()
+    if ($clean.Length -gt 40) { $clean = $clean.Substring(0, 40).Trim() }
+    return $clean
+}
+
+# Whatever was handed over, as a list of item ids: only texts of the shape an id has,
+# each of them once, and no more than a catalog could ever hold.
+function ConvertTo-DebloaterIdList {
+    param($Ids)
+    $seen = @{}
+    $list = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($id in @($Ids)) {
+        $text = [string]$id
+        if ($text -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$' -or $seen.ContainsKey($text)) { continue }
+        $seen[$text] = $true
+        $list.Add($text)
+        if ($list.Count -ge 2000) { break }
+    }
+    return $list.ToArray()
+}
+
+function Get-DebloaterSelectionsPath {
+    return (Join-Path (Get-DebloaterDataRoot) 'selections.json')
+}
+
+# The selections saved under a name, in the order they were saved. Each has a Name,
+# the day it was Saved and its Ids.
+function Get-DebloaterSelections {
+    $list = @()
+    $file = Get-DebloaterSelectionsPath
+    if (Test-Path -LiteralPath $file) {
+        try {
+            $names = @{}
+            foreach ($entry in @(Get-OptionalProperty (Read-DebloaterJson $file) 'selections')) {
+                $name = ConvertTo-DebloaterSelectionName ([string](Get-OptionalProperty $entry 'name'))
+                if (-not $name -or $names.ContainsKey($name)) { continue }
+                $names[$name] = $true
+                $list += [pscustomobject]@{
+                    Name = $name
+                    Saved = [string](Get-OptionalProperty $entry 'saved')
+                    Ids = @(ConvertTo-DebloaterIdList (Get-OptionalProperty $entry 'ids'))
+                }
+            }
+        } catch { $list = @() }
+    }
+    return $list
+}
+
+function Save-DebloaterSelections {
+    param($Selections)
+    $root = Get-DebloaterDataRoot
+    [void](New-Item -ItemType Directory -Force -Path $root)
+    $list = @()
+    foreach ($entry in @($Selections)) {
+        $list += [pscustomobject]@{ name = [string]$entry.Name; saved = [string]$entry.Saved; ids = @(ConvertTo-DebloaterIdList $entry.Ids) }
+    }
+    Write-DebloaterJson ([pscustomobject]@{ selections = $list }) (Get-DebloaterSelectionsPath)
+}
+
+# Writes a selection to a file of its own, to be carried to another PC. It names the
+# items and nothing else: not the PC and not the person.
+function Export-DebloaterSelection {
+    param([string]$Name, $Ids, [string]$Path)
+    Write-DebloaterJson ([pscustomobject][ordered]@{
+        app = 'Windows Debloater'; kind = 'selection'; version = (Get-DebloaterVersion)
+        name = (ConvertTo-DebloaterSelectionName $Name); saved = (Get-Date).ToString('yyyy-MM-dd')
+        ids = @(ConvertTo-DebloaterIdList $Ids)
+    }) $Path
+}
+
+# Reads a selection file. It is somebody's file, so nothing in it is taken on trust: it
+# has to say what it is, it may not be large, and only texts of the shape of an id are
+# taken from it. What is wrong is thrown as the key of the text that says so.
+function Import-DebloaterSelection {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'select.fail.missing' }
+    if ((Get-Item -LiteralPath $Path).Length -gt 262144) { throw 'select.fail.format' }
+    $data = $null
+    try { $data = Read-DebloaterJson $Path } catch { throw 'select.fail.format' }
+    if ([string](Get-OptionalProperty $data 'kind') -cne 'selection' -or [string](Get-OptionalProperty $data 'app') -cne 'Windows Debloater') {
+        throw 'select.fail.format'
+    }
+    $ids = @(ConvertTo-DebloaterIdList (Get-OptionalProperty $data 'ids'))
+    if ($ids.Count -eq 0) { throw 'select.fail.empty' }
+    $name = ConvertTo-DebloaterSelectionName ([string](Get-OptionalProperty $data 'name'))
+    if (-not $name) { $name = ConvertTo-DebloaterSelectionName ([IO.Path]::GetFileNameWithoutExtension($Path)) }
+    $saved = [string](Get-OptionalProperty $data 'saved')
+    if ($saved -notmatch '^\d{4}-\d{2}-\d{2}$') { $saved = '' }
+    $version = [string](Get-OptionalProperty $data 'version')
+    if ($version -notmatch '^\d+(\.\d+){1,3}$') { $version = '' }
+    return [pscustomobject]@{ Name = $name; Saved = $saved; Version = $version; Ids = $ids }
+}
+
+# The ids a remembered choice stands for today. "recommended" and "everything" are
+# worked out from the catalog each time, so they follow it as it grows. A saved one is
+# exactly its list. What someone ticked by hand is their list, plus whatever is
+# recommended and was not in the catalog yet when they chose: they have not decided
+# about that, so it follows the recommendation.
+function Resolve-DebloaterSelection {
+    param($Choice, $Catalog, $Selections)
+    $kind = [string](Get-OptionalProperty $Choice 'kind')
+    $name = [string](Get-OptionalProperty $Choice 'name')
+    if ($kind -eq 'saved') {
+        $entry = @($Selections) | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+        if ($entry) { return [pscustomobject]@{ Kind = 'saved'; Name = [string]$entry.Name; Ids = @(ConvertTo-DebloaterIdList $entry.Ids) } }
+        # Its list is gone; the copy kept with the choice is what was ticked.
+        $kind = 'custom'
+    }
+    if ($kind -eq 'everything') {
+        return [pscustomobject]@{ Kind = 'everything'; Name = ''; Ids = @(@($Catalog) | ForEach-Object { $_.Id }) }
+    }
+    if ($kind -eq 'custom') {
+        $ids = @(ConvertTo-DebloaterIdList (Get-OptionalProperty $Choice 'ids'))
+        $known = @{}
+        foreach ($id in @(ConvertTo-DebloaterIdList (Get-OptionalProperty $Choice 'known'))) { $known[$id] = $true }
+        if ($known.Count -gt 0) {
+            foreach ($item in @($Catalog)) { if ($item.Recommended -and -not $known.ContainsKey($item.Id)) { $ids += $item.Id } }
+        }
+        return [pscustomobject]@{ Kind = 'custom'; Name = ''; Ids = @(ConvertTo-DebloaterIdList $ids) }
+    }
+    return [pscustomobject]@{ Kind = 'recommended'; Name = ''; Ids = @(@($Catalog) | Where-Object { $_.Recommended } | ForEach-Object { $_.Id }) }
+}
+
+# What a list of ids comes to on one PC. $States gives each item's state there: "todo",
+# "done" or "absent". Ticked can be done here, Done is in place already, Missing is not
+# on this PC (an app that is not installed), and Unknown is not in this version's catalog.
+function Get-DebloaterSelectionFit {
+    param($Ids, $Catalog, $States)
+    $known = @{}
+    foreach ($item in @($Catalog)) { $known[$item.Id] = $true }
+    $ticked = @(); $done = @(); $missing = @(); $unknown = @()
+    foreach ($id in @(ConvertTo-DebloaterIdList $Ids)) {
+        if (-not $known.ContainsKey($id)) { $unknown += $id; continue }
+        $state = $States[$id]
+        if ($state -isnot [string]) { $state = [string](Get-OptionalProperty $state 'State') }
+        if ($state -eq 'todo') { $ticked += $id } elseif ($state -eq 'done') { $done += $id } else { $missing += $id }
+    }
+    return [pscustomobject]@{ Ticked = $ticked; Done = $done; Missing = $missing; Unknown = $unknown }
 }
 
 function Get-DebloaterWindowsInfo {
